@@ -14,7 +14,6 @@
 /////////////////////////////////////////////////////////////////////////////////
 
 #include <KlayGE/KlayGE.hpp>
-#include <KFL/ThrowErr.hpp>
 #include <KFL/Util.hpp>
 #include <KFL/Math.hpp>
 #include <KlayGE/RenderFactory.hpp>
@@ -72,63 +71,29 @@ namespace KlayGE
 
 	void OGLConditionalRender::Begin()
 	{
-		if (glloader_GL_VERSION_3_3() || glloader_GL_ARB_occlusion_query2())
-		{
-			glBeginQuery(GL_ANY_SAMPLES_PASSED, query_);
-		}
-		else
-		{
-			glBeginQuery(GL_SAMPLES_PASSED, query_);
-		}
+		glBeginQuery(GL_ANY_SAMPLES_PASSED, query_);
 	}
 
 	void OGLConditionalRender::End()
 	{
-		if (glloader_GL_VERSION_3_3() || glloader_GL_ARB_occlusion_query2())
-		{
-			glEndQuery(GL_ANY_SAMPLES_PASSED);
-		}
-		else
-		{
-			glEndQuery(GL_SAMPLES_PASSED);
-		}
+		glEndQuery(GL_ANY_SAMPLES_PASSED);
 	}
 
 	void OGLConditionalRender::BeginConditionalRender()
 	{
-		OGLRenderEngine& re = *checked_cast<OGLRenderEngine*>(&Context::Instance().RenderFactoryInstance().RenderEngineInstance());
+		auto& re = checked_cast<OGLRenderEngine&>(Context::Instance().RenderFactoryInstance().RenderEngineInstance());
 		if (!re.HackForAMD())
 		{
-			if (glloader_GL_VERSION_3_0())
-			{
-				glBeginConditionalRender(query_, GL_QUERY_WAIT);
-			}
-			else
-			{
-				if (glloader_GL_NV_conditional_render())
-				{
-					glBeginConditionalRenderNV(query_, GL_QUERY_WAIT_NV);
-				}
-			}
+			glBeginConditionalRender(query_, GL_QUERY_WAIT);
 		}
 	}
 
 	void OGLConditionalRender::EndConditionalRender()
 	{
-		OGLRenderEngine& re = *checked_cast<OGLRenderEngine*>(&Context::Instance().RenderFactoryInstance().RenderEngineInstance());
+		auto& re = checked_cast<OGLRenderEngine&>(Context::Instance().RenderFactoryInstance().RenderEngineInstance());
 		if (!re.HackForAMD())
 		{
-			if (glloader_GL_VERSION_3_0())
-			{
-				glEndConditionalRender();
-			}
-			else
-			{
-				if (glloader_GL_NV_conditional_render())
-				{
-					glEndConditionalRenderNV();
-				}
-			}
+			glEndConditionalRender();
 		}
 	}
 
@@ -177,5 +142,56 @@ namespace KlayGE
 		GLuint64 ret;
 		glGetQueryObjectui64v(query_, GL_QUERY_RESULT, &ret);
 		return static_cast<uint64_t>(ret) * 1e-9;
+	}
+
+
+	OGLSOStatisticsQuery::OGLSOStatisticsQuery()
+	{
+		glGenQueries(1, &primitive_written_query_);
+		glGenQueries(1, &primitive_generated_query_);
+	}
+
+	OGLSOStatisticsQuery::~OGLSOStatisticsQuery()
+	{
+		glDeleteQueries(1, &primitive_written_query_);
+		glDeleteQueries(1, &primitive_generated_query_);
+	}
+
+	void OGLSOStatisticsQuery::Begin()
+	{
+		glBeginQuery(GL_TRANSFORM_FEEDBACK_PRIMITIVES_WRITTEN, primitive_written_query_);
+		glBeginQuery(GL_PRIMITIVES_GENERATED, primitive_generated_query_);
+	}
+
+	void OGLSOStatisticsQuery::End()
+	{
+		glEndQuery(GL_TRANSFORM_FEEDBACK_PRIMITIVES_WRITTEN);
+		glEndQuery(GL_PRIMITIVES_GENERATED);
+	}
+
+	uint64_t OGLSOStatisticsQuery::NumPrimitivesWritten()
+	{
+		GLuint available = 0;
+		while (!available)
+		{
+			glGetQueryObjectuiv(primitive_written_query_, GL_QUERY_RESULT_AVAILABLE, &available);
+		}
+
+		GLuint64 ret;
+		glGetQueryObjectui64v(primitive_written_query_, GL_QUERY_RESULT, &ret);
+		return ret;
+	}
+
+	uint64_t OGLSOStatisticsQuery::PrimitivesGenerated()
+	{
+		GLuint available = 0;
+		while (!available)
+		{
+			glGetQueryObjectuiv(primitive_generated_query_, GL_QUERY_RESULT_AVAILABLE, &available);
+		}
+
+		GLuint64 ret;
+		glGetQueryObjectui64v(primitive_generated_query_, GL_QUERY_RESULT, &ret);
+		return ret;
 	}
 }

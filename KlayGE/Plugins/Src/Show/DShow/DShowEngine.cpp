@@ -12,22 +12,41 @@
 
 #include <KlayGE/KlayGE.hpp>
 #define _WIN32_DCOM
-#include <KFL/ThrowErr.hpp>
+#include <KFL/ErrorHandling.hpp>
 #include <KFL/Util.hpp>
-#include <KFL/COMPtr.hpp>
 #include <KlayGE/Context.hpp>
 #include <KlayGE/App3D.hpp>
 #include <KlayGE/Window.hpp>
 
 #include <boost/assert.hpp>
+#include <windows.h>
 #include <uuids.h>
+#include <control.h>
+#if defined(KLAYGE_COMPILER_GCC)
+#pragma GCC diagnostic push
+// Those GCC diagnostic ignored lines don't work, because those warnings are emitted by preprocessor
+#pragma GCC diagnostic ignored "-Wcomment" // Ignore "/*" within block comment
+#pragma GCC diagnostic ignored "-Wunknown-pragmas" // Ignore unknown pragmas
+#endif
+#include <d3d9.h>
+#if defined(KLAYGE_COMPILER_GCC)
+#pragma GCC diagnostic pop
+#endif
+#ifdef KLAYGE_COMPILER_GCC
+#define _WIN32_WINNT_BACKUP _WIN32_WINNT
+#undef _WIN32_WINNT
+#define _WIN32_WINNT 0x0501
+#endif
+#include <strmif.h>
+#ifdef KLAYGE_COMPILER_GCC
+#undef _WIN32_WINNT
+#define _WIN32_WINNT _WIN32_WINNT_BACKUP
+#endif
+
+#include <vmr9.h>
 
 #include <KlayGE/DShow/DShowVMR9Allocator.hpp>
 #include <KlayGE/DShow/DShow.hpp>
-
-#ifdef KLAYGE_COMPILER_MSVC
-#pragma comment(lib, "strmiids.lib")
-#endif
 
 namespace KlayGE
 {
@@ -84,21 +103,21 @@ namespace KlayGE
 	/////////////////////////////////////////////////////////////////////////////////
 	void DShowEngine::DoPlay()
 	{
-		TIF(media_control_->Run());
+		TIFHR(media_control_->Run());
 	}
 
 	// 暂停播放
 	/////////////////////////////////////////////////////////////////////////////////
 	void DShowEngine::DoPause()
 	{
-		TIF(media_control_->Pause());
+		TIFHR(media_control_->Pause());
 	}
 
 	// 停止播放
 	/////////////////////////////////////////////////////////////////////////////////
 	void DShowEngine::DoStop()
 	{
-		TIF(media_control_->Stop());
+		TIFHR(media_control_->Stop());
 	}
 
 	// 载入文件
@@ -108,57 +127,35 @@ namespace KlayGE
 		this->Free();
 		this->Init();
 
-		IGraphBuilder* graph;
-		TIF(::CoCreateInstance(CLSID_FilterGraph, nullptr, CLSCTX_ALL,
-			IID_IGraphBuilder, reinterpret_cast<void**>(&graph)));
-		graph_ = MakeCOMPtr(graph);
+		TIFHR(::CoCreateInstance(CLSID_FilterGraph, nullptr, CLSCTX_ALL,
+			IID_IGraphBuilder, graph_.put_void()));
 
-		IBaseFilter* filter;
-		TIF(::CoCreateInstance(CLSID_VideoMixingRenderer9, nullptr, CLSCTX_INPROC_SERVER,
-			IID_IBaseFilter, reinterpret_cast<void**>(&filter)));
-		filter_ = MakeCOMPtr(filter);
+		TIFHR(::CoCreateInstance(CLSID_VideoMixingRenderer9, nullptr, CLSCTX_INPROC_SERVER,
+			IID_IBaseFilter, filter_.put_void()));
 
-		std::shared_ptr<IVMRFilterConfig9> filter_config;
-		{
-			IVMRFilterConfig9* tmp;
-			TIF(filter_->QueryInterface(IID_IVMRFilterConfig9, reinterpret_cast<void**>(&tmp)));
-			filter_config = MakeCOMPtr(tmp);
-		}
+		auto filter_config = filter_.as<IVMRFilterConfig9>(IID_IVMRFilterConfig9);
 
-		TIF(filter_config->SetRenderingMode(VMR9Mode_Renderless));
-		TIF(filter_config->SetNumberOfStreams(1));
+		TIFHR(filter_config->SetRenderingMode(VMR9Mode_Renderless));
+		TIFHR(filter_config->SetNumberOfStreams(1));
 
-		std::shared_ptr<IVMRSurfaceAllocatorNotify9> vmr_surf_alloc_notify;
-		{
-			IVMRSurfaceAllocatorNotify9* tmp;
-			TIF(filter_->QueryInterface(IID_IVMRSurfaceAllocatorNotify9, reinterpret_cast<void**>(&tmp)));
-			vmr_surf_alloc_notify = MakeCOMPtr(tmp);
-		}
+		auto vmr_surf_alloc_notify = filter_.as<IVMRSurfaceAllocatorNotify9>(IID_IVMRSurfaceAllocatorNotify9);
 
 		// create our surface allocator
-		vmr_allocator_ = MakeCOMPtr(new DShowVMR9Allocator(Context::Instance().AppInstance().MainWnd()->HWnd()));
+		vmr_allocator_.reset(new DShowVMR9Allocator(Context::Instance().AppInstance().MainWnd()->HWnd()), false);
 
 		// let the allocator and the notify know about each other
-		TIF(vmr_surf_alloc_notify->AdviseSurfaceAllocator(static_cast<DWORD_PTR>(DShowVMR9Allocator::USER_ID),
+		TIFHR(vmr_surf_alloc_notify->AdviseSurfaceAllocator(static_cast<DWORD_PTR>(DShowVMR9Allocator::USER_ID),
 			vmr_allocator_.get()));
-		TIF(vmr_allocator_->AdviseNotify(vmr_surf_alloc_notify.get()));
+		TIFHR(vmr_allocator_->AdviseNotify(vmr_surf_alloc_notify.get()));
 
-		TIF(graph_->AddFilter(filter_.get(), L"Video Mixing Renderer 9"));
+		TIFHR(graph_->AddFilter(filter_.get(), L"Video Mixing Renderer 9"));
 
-		{
-			IMediaControl* tmp;
-			TIF(graph_->QueryInterface(IID_IMediaControl, reinterpret_cast<void**>(&tmp)));
-			media_control_ = MakeCOMPtr(tmp);
-		}
-		{
-			IMediaEvent* tmp;
-			TIF(graph_->QueryInterface(IID_IMediaEvent, reinterpret_cast<void**>(&tmp)));
-			media_event_ = MakeCOMPtr(tmp);
-		}
+		graph_.as(IID_IMediaControl, media_control_);
+		graph_.as(IID_IMediaEvent, media_event_);
 
 		std::wstring fn;
 		Convert(fn, fileName);
-		TIF(graph_->RenderFile(fn.c_str(), nullptr));
+		TIFHR(graph_->RenderFile(fn.c_str(), nullptr));
 
 		state_ = SS_Stopped;
 	}
@@ -180,7 +177,7 @@ namespace KlayGE
 			}
 
 			// 释放和这个事件相关的内存
-			TIF(media_event_->FreeEventParams(lEventCode, lParam1, lParam2));
+			TIFHR(media_event_->FreeEventParams(lEventCode, lParam1, lParam2));
 		}
 
 		return ret;
@@ -220,6 +217,6 @@ namespace KlayGE
 	/////////////////////////////////////////////////////////////////////////////////
 	TexturePtr DShowEngine::PresentTexture()
 	{
-		return checked_pointer_cast<DShowVMR9Allocator>(vmr_allocator_)->PresentTexture();
+		return checked_cast<DShowVMR9Allocator*>(vmr_allocator_.get())->PresentTexture();
 	}
 }

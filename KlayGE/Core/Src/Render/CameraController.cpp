@@ -24,6 +24,8 @@
 //////////////////////////////////////////////////////////////////////////////////
 
 #include <KlayGE/KlayGE.hpp>
+#include <KFL/CustomizedStreamBuf.hpp>
+#include <KFL/ErrorHandling.hpp>
 #include <KFL/Util.hpp>
 #include <KlayGE/Context.hpp>
 #include <KlayGE/InputFactory.hpp>
@@ -31,11 +33,14 @@
 #include <KFL/Color.hpp>
 #include <KlayGE/UI.hpp>
 #include <KlayGE/Camera.hpp>
+#include <KlayGE/SceneNode.hpp>
 #include <KFL/XMLDom.hpp>
 #include <KlayGE/App3D.hpp>
+#include <KFL/Hash.hpp>
 
-#include <sstream>
-#include <boost/lexical_cast.hpp>
+#include <istream>
+#include <iterator>
+#include <string>
 
 #include <KlayGE/CameraController.hpp>
 
@@ -93,11 +98,14 @@ namespace KlayGE
 
 			InputEngine& inputEngine(Context::Instance().InputFactoryInstance().InputEngineInstance());
 			InputActionMap actionMap;
-			actionMap.AddActions(&actions[0], &actions[sizeof(actions) / sizeof(actions[0])]);
+			actionMap.AddActions(actions, actions + std::size(actions));
 
 			action_handler_t input_handler = MakeSharedPtr<input_signal>();
-			input_handler->connect(std::bind(&FirstPersonCameraController::InputHandler, this,
-				std::placeholders::_1, std::placeholders::_2));
+			input_handler->Connect(
+				[this](InputEngine const & ie, InputAction const & action)
+				{
+					this->InputHandler(ie, action);
+				});
 			inputEngine.ActionMap(actionMap, input_handler);
 		}
 	}
@@ -154,8 +162,7 @@ namespace KlayGE
 					break;
 
 				default:
-					BOOST_ASSERT(false);
-					break;
+					KFL_UNREACHABLE("Invalid input type");
 				}
 				break;
 
@@ -211,10 +218,10 @@ namespace KlayGE
 			float3 movement(x, y, z);
 			movement *= moveScaler_;
 
-			float3 new_eye_pos = camera_->EyePos() + MathLib::transform_quat(movement, inv_rot_);
+			auto& camera_node = *camera_->BoundSceneNode();
+			camera_node.TransformToWorld(MathLib::translation(movement) * camera_node.TransformToParent());
 
-			camera_->ViewParams(new_eye_pos, new_eye_pos + camera_->ForwardVec() * camera_->LookAtDist(),
-				camera_->UpVec());
+			camera_->DirtyTransforms();
 		}
 	}
 
@@ -243,7 +250,11 @@ namespace KlayGE
 			float3 view_vec = MathLib::transform_quat(float3(0, 0, 1), inv_rot_);
 			float3 up_vec = MathLib::transform_quat(float3(0, 1, 0), inv_rot_);
 
-			camera_->ViewParams(camera_->EyePos(), camera_->EyePos() + view_vec * camera_->LookAtDist(), up_vec);
+			auto& camera_node = *camera_->BoundSceneNode();
+			camera_node.TransformToWorld(
+				MathLib::inverse(MathLib::look_at_lh(camera_->EyePos(), camera_->EyePos() + view_vec * camera_->LookAtDist(), up_vec)));
+
+			camera_->DirtyTransforms();
 		}
 	}
 
@@ -262,7 +273,11 @@ namespace KlayGE
 			float3 view_vec = MathLib::transform_quat(float3(0, 0, 1), inv_rot_);
 			float3 up_vec = MathLib::transform_quat(float3(0, 1, 0), inv_rot_);
 
-			camera_->ViewParams(camera_->EyePos(), camera_->EyePos() + view_vec * camera_->LookAtDist(), up_vec);
+			auto& camera_node = *camera_->BoundSceneNode();
+			camera_node.TransformToWorld(
+				MathLib::inverse(MathLib::look_at_lh(camera_->EyePos(), camera_->EyePos() + view_vec * camera_->LookAtDist(), up_vec)));
+
+			camera_->DirtyTransforms();
 		}
 	}
 
@@ -284,11 +299,14 @@ namespace KlayGE
 
 			InputEngine& inputEngine(Context::Instance().InputFactoryInstance().InputEngineInstance());
 			InputActionMap actionMap;
-			actionMap.AddActions(&actions[0], &actions[sizeof(actions) / sizeof(actions[0])]);
+			actionMap.AddActions(actions, actions + std::size(actions));
 
 			action_handler_t input_handler = MakeSharedPtr<input_signal>();
-			input_handler->connect(std::bind(&TrackballCameraController::InputHandler, this,
-				std::placeholders::_1, std::placeholders::_2));
+			input_handler->Connect(
+				[this](InputEngine const & ie, InputAction const & action)
+				{
+					this->InputHandler(ie, action);
+				});
 			inputEngine.ActionMap(actionMap, input_handler);
 		}
 	}
@@ -377,7 +395,11 @@ namespace KlayGE
 		pos += offset;
 		target_ += offset;
 
-		camera_->ViewParams(pos, target_, camera_->UpVec());
+		camera_->LookAtDist(MathLib::length(target_ - pos));
+		auto& camera_node = *camera_->BoundSceneNode();
+		camera_node.TransformToWorld(MathLib::inverse(MathLib::look_at_lh(pos, target_, camera_->UpVec())));
+
+		camera_->DirtyTransforms();
 	}
 
 	void TrackballCameraController::Rotate(float offset_x, float offset_y)
@@ -405,7 +427,11 @@ namespace KlayGE
 		dir /= dist;
 		float3 up = MathLib::cross(dir, right_);
 
-		camera_->ViewParams(pos, pos + dir * dist, up);
+		camera_->LookAtDist(dist);
+		auto& camera_node = *camera_->BoundSceneNode();
+		camera_node.TransformToWorld(MathLib::inverse(MathLib::look_at_lh(pos, pos + dir * dist, up)));
+
+		camera_->DirtyTransforms();
 	}
 
 	void TrackballCameraController::Zoom(float offset_x, float offset_y)
@@ -422,7 +448,11 @@ namespace KlayGE
 			reverse_target_ = false;
 		}
 
-		camera_->ViewParams(pos, pos + camera_->ForwardVec() * camera_->LookAtDist(), camera_->UpVec());
+		auto& camera_node = *camera_->BoundSceneNode();
+		camera_node.TransformToWorld(
+			MathLib::inverse(MathLib::look_at_lh(pos, pos + camera_->ForwardVec() * camera_->LookAtDist(), camera_->UpVec())));
+
+		camera_->DirtyTransforms();
 	}
 
 
@@ -607,13 +637,16 @@ namespace KlayGE
 		CameraController::AttachCamera(camera);
 
 		start_time_ = Context::Instance().AppInstance().AppTime();
-		camera.BindUpdateFunc(std::bind(&CameraPathController::UpdateCameraFunc, this,
-			std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
+		connection_ = camera.OnMainThreadUpdate().Connect(
+			[this](SceneComponent& component, float app_time, float elapsed_time)
+			{
+				this->UpdateCameraFunc(checked_cast<Camera&>(component), app_time, elapsed_time);
+			});
 	}
 
 	void CameraPathController::DetachCamera()
 	{
-		camera_->BindUpdateFunc(std::function<void(Camera&, float, float)>());
+		camera_->OnMainThreadUpdate().Disconnect(connection_);
 
 		CameraController::DetachCamera();
 	}
@@ -655,7 +688,9 @@ namespace KlayGE
 							float3 up = MathLib::lerp(curve.up_ctrl_pts[j + 0],
 								curve.up_ctrl_pts[j + 1], factor);
 
-							camera_->ViewParams(eye, target, up);
+							camera_->LookAtDist(MathLib::length(target - eye));
+							auto& camera_node = *camera_->BoundSceneNode();
+							camera_node.TransformToWorld(MathLib::inverse(MathLib::look_at_lh(eye, target, up)));
 
 							break;
 						}
@@ -680,7 +715,9 @@ namespace KlayGE
 								curve.up_ctrl_pts[j + 1], curve.up_ctrl_pts[j + 2], 
 								curve.up_ctrl_pts[j + 3], factor);
 
-							camera_->ViewParams(eye, target, up);
+							camera_->LookAtDist(MathLib::length(target - eye));
+							auto& camera_node = *camera_->BoundSceneNode();
+							camera_node.TransformToWorld(MathLib::inverse(MathLib::look_at_lh(eye, target, up)));
 
 							break;
 						}
@@ -705,7 +742,9 @@ namespace KlayGE
 								curve.up_ctrl_pts[j + 1], curve.up_ctrl_pts[j + 2], 
 								curve.up_ctrl_pts[j + 3], factor);
 
-							camera_->ViewParams(eye, target, up);
+							camera_->LookAtDist(MathLib::length(target - eye));
+							auto& camera_node = *camera_->BoundSceneNode();
+							camera_node.TransformToWorld(MathLib::inverse(MathLib::look_at_lh(eye, target, up)));
 
 							break;
 						}
@@ -730,7 +769,9 @@ namespace KlayGE
 								curve.up_ctrl_pts[j + 1], curve.up_ctrl_pts[j + 2], 
 								curve.up_ctrl_pts[j + 3], factor);
 
-							camera_->ViewParams(eye, target, up);
+							camera_->LookAtDist(MathLib::length(target - eye));
+							auto& camera_node = *camera_->BoundSceneNode();
+							camera_node.TransformToWorld(MathLib::inverse(MathLib::look_at_lh(eye, target, up)));
 
 							break;
 						}
@@ -738,8 +779,7 @@ namespace KlayGE
 					break;
 
 				default:
-					BOOST_ASSERT(false);
-					break;
+					KFL_UNREACHABLE("Invalid interpolate type");
 				}
 
 				break;
@@ -749,9 +789,11 @@ namespace KlayGE
 				frame -= curve.num_frames;
 			}
 		}
+
+		camera_->DirtyTransforms();
 	}
 
-	CameraPathControllerPtr LoadCameraPath(ResIdentifierPtr const & res)
+	CameraPathControllerPtr LoadCameraPath(ResIdentifier& res)
 	{
 		CameraPathControllerPtr ret = MakeSharedPtr<CameraPathController>();
 
@@ -766,8 +808,8 @@ namespace KlayGE
 
 		for (XMLNodePtr curve_node = root->FirstNode("curve"); curve_node; curve_node = curve_node->NextSibling("curve"))
 		{
-			std::string type_str = curve_node->Attrib("type")->ValueString();
-			size_t const type_str_hash = RT_HASH(type_str.c_str());
+			std::string_view const type_str = curve_node->Attrib("type")->ValueString();
+			size_t const type_str_hash = HashRange(type_str.begin(), type_str.end());
 			CameraPathController::InterpolateType type;
 			if (CT_HASH("linear") == type_str_hash)
 			{
@@ -787,8 +829,7 @@ namespace KlayGE
 			}
 			else
 			{
-				BOOST_ASSERT(false);
-				type = CameraPathController::IT_Linear;
+				KFL_UNREACHABLE("Invalid interpolate type");
 			}
 			uint32_t num_frames = curve_node->Attrib("num_frames")->ValueUInt();
 			uint32_t curve_id = ret->AddCurve(type, num_frames);
@@ -798,18 +839,21 @@ namespace KlayGE
 
 				float3 eye_ctrl_pt;
 				{
-					std::istringstream attr_ss(key_node->Attrib("eye")->ValueString());
-					attr_ss >> eye_ctrl_pt.x() >> eye_ctrl_pt.y() >> eye_ctrl_pt.z();
-				}				
+					auto v = key_node->Attrib("eye")->ValueString();
+					MemInputStreamBuf stream_buff(v.data(), v.size());
+					std::istream(&stream_buff) >> eye_ctrl_pt.x() >> eye_ctrl_pt.y() >> eye_ctrl_pt.z();
+				}
 				float3 target_ctrl_pt;
 				{
-					std::istringstream attr_ss(key_node->Attrib("target")->ValueString());
-					attr_ss >> target_ctrl_pt.x() >> target_ctrl_pt.y() >> target_ctrl_pt.z();
-				}				
+					auto v = key_node->Attrib("target")->ValueString();
+					MemInputStreamBuf stream_buff(v.data(), v.size());
+					std::istream(&stream_buff) >> target_ctrl_pt.x() >> target_ctrl_pt.y() >> target_ctrl_pt.z();
+				}
 				float3 up_ctrl_pt;
 				{
-					std::istringstream attr_ss(key_node->Attrib("up")->ValueString());
-					attr_ss >> up_ctrl_pt.x() >> up_ctrl_pt.y() >> up_ctrl_pt.z();
+					auto v = key_node->Attrib("up")->ValueString();
+					MemInputStreamBuf stream_buff(v.data(), v.size());
+					std::istream(&stream_buff) >> up_ctrl_pt.x() >> up_ctrl_pt.y() >> up_ctrl_pt.z();
 				}
 
 				bool corner;
@@ -862,8 +906,7 @@ namespace KlayGE
 				break;
 
 			default:
-				BOOST_ASSERT(false);
-				break;
+				KFL_UNREACHABLE("Invalid interpolate type");
 			}
 			curve_node->AppendAttrib(doc.AllocAttribString("type", type_str));
 			curve_node->AppendAttrib(doc.AllocAttribUInt("num_frames", path->NumCurveFrames(curve_id)));
@@ -876,23 +919,23 @@ namespace KlayGE
 
 				{
 					float3 const & eye_ctrl_pt = path->EyeControlPoint(curve_id, key_id);
-					std::string eye_str = boost::lexical_cast<std::string>(eye_ctrl_pt.x())
-						+ ' ' + boost::lexical_cast<std::string>(eye_ctrl_pt.y())
-						+ ' ' + boost::lexical_cast<std::string>(eye_ctrl_pt.z());
+					std::string eye_str = std::to_string(eye_ctrl_pt.x())
+						+ ' ' + std::to_string(eye_ctrl_pt.y())
+						+ ' ' + std::to_string(eye_ctrl_pt.z());
 					key_node->AppendAttrib(doc.AllocAttribString("eye", eye_str));
 				}
 				{
 					float3 const & target_ctrl_pt = path->TargetControlPoint(curve_id, key_id);
-					std::string target_str = boost::lexical_cast<std::string>(target_ctrl_pt.x())
-						+ ' ' + boost::lexical_cast<std::string>(target_ctrl_pt.y())
-						+ ' ' + boost::lexical_cast<std::string>(target_ctrl_pt.z());
+					std::string target_str = std::to_string(target_ctrl_pt.x())
+						+ ' ' + std::to_string(target_ctrl_pt.y())
+						+ ' ' + std::to_string(target_ctrl_pt.z());
 					key_node->AppendAttrib(doc.AllocAttribString("target", target_str));
 				}
 				{
 					float3 const & up_ctrl_pt = path->EyeControlPoint(curve_id, key_id);
-					std::string up_str = boost::lexical_cast<std::string>(up_ctrl_pt.x())
-						+ ' ' + boost::lexical_cast<std::string>(up_ctrl_pt.y())
-						+ ' ' + boost::lexical_cast<std::string>(up_ctrl_pt.z());
+					std::string up_str = std::to_string(up_ctrl_pt.x())
+						+ ' ' + std::to_string(up_ctrl_pt.y())
+						+ ' ' + std::to_string(up_ctrl_pt.z());
 					key_node->AppendAttrib(doc.AllocAttribString("up", up_str));
 				}
 

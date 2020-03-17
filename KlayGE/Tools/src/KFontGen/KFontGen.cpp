@@ -1,11 +1,42 @@
+/**
+ * @file KFontGen.cpp
+ * @author Minmin Gong
+ *
+ * @section DESCRIPTION
+ *
+ * This source file is part of KlayGE
+ * For the latest info, see http://www.klayge.org
+ *
+ * @section LICENSE
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published
+ * by the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+ *
+ * You may alternatively use this source under the terms of
+ * the KlayGE Proprietary License (KPL). You can obtained such a license
+ * from http://www.klayge.org/licensing/.
+ */
+
 #include <KlayGE/KlayGE.hpp>
+#include <KFL/CXX17/filesystem.hpp>
 #include <KFL/Util.hpp>
 #include <KFL/Timer.hpp>
 #include <KFL/Math.hpp>
 #include <KFL/Thread.hpp>
 #include <KFL/CpuInfo.hpp>
 #include <KlayGE/LZMACodec.hpp>
-#include <KFL/AlignedAllocator.hpp>
+#include <KlayGE/DistanceField.hpp>
 
 #include <kfont/kfont.hpp>
 
@@ -16,19 +47,10 @@
 #include <cstring>
 #include <atomic>
 
-#if defined(KLAYGE_COMPILER_MSVC)
-#pragma warning(push)
-#pragma warning(disable: 4512) // boost::program_options::options_description doesn't have assignment operator
-#elif defined(KLAYGE_COMPILER_GCC)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations" // Ignore auto_ptr declaration
+#ifndef KLAYGE_DEBUG
+#define CXXOPTS_NO_RTTI
 #endif
-#include <boost/program_options.hpp>
-#if defined(KLAYGE_COMPILER_MSVC)
-#pragma warning(pop)
-#elif defined(KLAYGE_COMPILER_GCC)
-#pragma GCC diagnostic pop
-#endif
+#include <cxxopts.hpp>
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
@@ -66,193 +88,6 @@ struct font_info
 
 	uint32_t dist_index;
 };
-
-float EdgeDistance(float2 const & grad, float val)
-{
-	float df;
-	if ((0 == grad.x()) || (0 == grad.y()))
-	{
-		df = 0.5f - val;
-	}
-	else
-	{
-		float2 n_grad = MathLib::abs(MathLib::normalize(grad));
-		if (n_grad.x() < n_grad.y())
-		{
-			std::swap(n_grad.x(), n_grad.y());
-		}
-
-		float v1 = 0.5f * n_grad.y() / n_grad.x();
-		if (val < v1)
-		{
-			df = 0.5f * (n_grad.x() + n_grad.y()) - MathLib::sqrt(2 * n_grad.x() * n_grad.y() * val);
-		}
-		else if (val < 1 - v1)
-		{
-			df = (0.5f - val) * n_grad.x();
-		}
-		else
-		{
-			df = -0.5f * (n_grad.x() + n_grad.y()) + MathLib::sqrt(2 * n_grad.x() * n_grad.y() * (1 - val));
-		}
-	}
-	return df;
-}
-
-float AADist(std::vector<float> const & img, std::vector<float2> const & grad,
-	int width, int offset_addr, int2 const & offset_dist_xy, float2 const & new_dist)
-{
-	int closest = offset_addr - offset_dist_xy.y() * width - offset_dist_xy.x(); // Index to the edge pixel pointed to from c
-	float val = img[closest];
-	if (0 == val)
-	{
-		return 1e10f;
-	}
-
-	float di = MathLib::length(new_dist);
-	float df;
-	if (0 == di)
-	{
-		df = EdgeDistance(grad[closest], val);
-	}
-	else
-	{
-		df = EdgeDistance(new_dist, val);
-	}
-	return di + df;
-}
-
-bool UpdateDistance(int x, int y, int dx, int dy, std::vector<float> const & img, int width,
-	std::vector<float2> const & grad, std::vector<int2>& dist_xy, std::vector<float>& dist)
-{
-	float const EPSILON = 1e-3f;
-
-	bool changed = false;
-	int addr = y * width + x;
-	float old_dist = dist[addr];
-	if (old_dist > 0)
-	{
-		int offset_addr = (y + dy) * width + (x + dx);
-		int2 new_dist_xy = dist_xy[offset_addr] - int2(dx, dy);
-		float new_dist = AADist(img, grad, width, offset_addr, dist_xy[offset_addr], new_dist_xy);
-		if (new_dist < old_dist - EPSILON)
-		{
-			dist_xy[addr] = new_dist_xy;
-			dist[addr] = new_dist;
-			changed = true;
-		}
-	}
-
-	return changed;
-}
-
-void AAEuclideanDistance(std::vector<float> const & img, std::vector<float2> const & grad,
-	int width, int height, std::vector<float>& dist)
-{
-	std::vector<int2> dist_xy(img.size(), int2(0, 0));
-
-	for (size_t i = 0; i < img.size(); ++ i)
-	{
-		if (img[i] <= 0)
-		{
-			dist[i] = 1e10f;
-		}
-		else if (img[i] < 1)
-		{
-			dist[i] = EdgeDistance(grad[i], img[i]);
-		}
-		else
-		{
-			dist[i] = 0;
-		}
-	}
-
-	bool changed;
-	do
-	{
-		changed = false;
-
-		for (int y = 1; y < height; ++ y)
-		{
-			// Scan right, propagate distances from above & left
-			for (int x = 0; x < width; ++ x)
-			{
-				if (x > 0)
-				{
-					changed |= UpdateDistance(x, y, -1, +0, img, width, grad, dist_xy, dist);
-					changed |= UpdateDistance(x, y, -1, -1, img, width, grad, dist_xy, dist);
-				}
-				changed |= UpdateDistance(x, y, +0, -1, img, width, grad, dist_xy, dist);
-				if (x < width - 1)
-				{
-					changed |= UpdateDistance(x, y, +1, -1, img, width, grad, dist_xy, dist);
-				}
-			}
-
-			// Scan left, propagate distance from right
-			for (int x = width - 2; x >= 0; -- x)
-			{
-				changed |= UpdateDistance(x, y, +1, +0, img, width, grad, dist_xy, dist);
-			}
-		}
-
-		for (int y = height - 2; y >= 0; -- y)
-		{
-			// Scan left, propagate distances from below & right
-			for (int x = width - 1; x >= 0; -- x)
-			{
-				if (x < width - 1)
-				{
-					changed |= UpdateDistance(x, y, +1, +0, img, width, grad, dist_xy, dist);
-					changed |= UpdateDistance(x, y, +1, +1, img, width, grad, dist_xy, dist);
-				}
-				changed |= UpdateDistance(x, y, +0, +1, img, width, grad, dist_xy, dist);
-				if (x > 0)
-				{
-					changed |= UpdateDistance(x, y, -1, +1, img, width, grad, dist_xy, dist);
-				}
-			}
-
-			// Scan right, propagate distance from left
-			for (int x = 1; x < width; ++ x)
-			{
-				changed |= UpdateDistance(x, y, -1, +0, img, width, grad, dist_xy, dist);
-			}
-		}
-	} while (changed);
-}
-
-void ComputeGradient(std::vector<float> const & img_2x, int w, int h, std::vector<float2>& grad)
-{
-	BOOST_ASSERT(img_2x.size() == static_cast<size_t>(w * h * 4));
-	BOOST_ASSERT(grad.size() == static_cast<size_t>(w * h));
-
-	std::vector<float2> grad_2x(w * h * 4, float2(0, 0));
-	for (int y = 1; y < h * 2 - 1; ++ y)
-	{
-		for (int x = 1; x < w * 2 - 1; ++ x)
-		{
-			int addr = y * w * 2 + x;
-			if ((img_2x[addr] > 0) && (img_2x[addr] < 1))
-			{
-				float s = -img_2x[addr - w * 2 - 1] - img_2x[addr + w * 2 - 1] + img_2x[addr - w * 2 + 1] + img_2x[addr + w * 2 + 1];
-				grad_2x[addr] = MathLib::normalize(float2(s - SQRT2 * (img_2x[addr - 1] - img_2x[addr + 1]),
-					s - SQRT2 * (img_2x[addr - w * 2] - img_2x[addr + w * 2])));
-			}
-		}
-	}
-
-	for (int y = 0; y < h; ++ y)
-	{
-		for (int x = 0; x < w; ++ x)
-		{
-			grad[y * w + x] = (grad_2x[(y * 2 + 0) * w * 2 + (x * 2 + 0)]
-				+ grad_2x[(y * 2 + 0) * w * 2 + (x * 2 + 1)]
-				+ grad_2x[(y * 2 + 1) * w * 2 + (x * 2 + 0)]
-				+ grad_2x[(y * 2 + 1) * w * 2 + (x * 2 + 1)]) * 0.25f;
-		}
-	}
-}
 
 struct raster_user_struct
 {
@@ -309,11 +144,11 @@ public:
 	ttf_to_dist(FT_Library ft_lib, FT_Face ft_face, uint32_t internal_char_size, uint32_t char_size,
 		uint32_t const * validate_chars, font_info* char_info, float* char_dist_data,
 		int32_t& cur_num_char, std::atomic<int32_t>& cur_package, uint32_t num_chars,
-		float& min_value, float& max_value, uint32_t thread_id, uint32_t num_threads, uint32_t num_chars_per_package)
+		float& min_value, float& max_value, uint32_t num_chars_per_package)
 		: ft_lib_(ft_lib), ft_face_(ft_face), internal_char_size_(internal_char_size), char_size_(char_size),
 			validate_chars_(validate_chars), char_info_(char_info), char_dist_data_(char_dist_data),
 			cur_num_char_(&cur_num_char), cur_package_(&cur_package), num_chars_(num_chars),
-			thread_id_(thread_id), num_threads_(num_threads), num_chars_per_package_(num_chars_per_package),
+			num_chars_per_package_(num_chars_per_package),
 			min_value_(&min_value), max_value_(&max_value)
 	{
 	}
@@ -327,12 +162,9 @@ public:
 
 		float const scale = 1 / MathLib::sqrt(static_cast<float>(char_size_ * char_size_ + char_size_ * char_size_));
 
-		std::vector<uint8_t, aligned_allocator<uint8_t, 16>> char_bitmap(internal_char_size_ / 8 * internal_char_size_);
+		std::vector<uint8_t> char_bitmap(internal_char_size_ / 8 * internal_char_size_);
 		std::vector<float> aa_char_bitmap_2x(char_size_ * char_size_ * 4);
-		std::vector<float> aa_char_bitmap(char_size_ * char_size_);
-		std::vector<float2> grad(char_size_ * char_size_);
-		std::vector<float> outside(char_size_ * char_size_);
-		std::vector<float> inside(char_size_ * char_size_);
+		std::vector<float> dist_data(char_size_ * char_size_);
 
 		raster_user_struct raster_user;
 		raster_user.internal_char_size = internal_char_size_;
@@ -388,9 +220,7 @@ public:
 					ci.height = static_cast<uint16_t>(std::min<float>(1.0f, (buf_height + y_offset) / internal_char_size_) * char_size_ + 0.5f);
 
 					memset(&aa_char_bitmap_2x[0], 0, sizeof(aa_char_bitmap_2x[0]) * aa_char_bitmap_2x.size());
-					memset(&grad[0], 0, sizeof(grad[0]) * grad.size());
-					memset(&outside[0], 0, sizeof(outside[0]) * outside.size());
-					memset(&inside[0], 0, sizeof(outside[0]) * outside.size());
+					memset(&dist_data[0], 0, sizeof(dist_data[0]) * dist_data.size());
 
 					{
 						float const fblock = static_cast<float>(internal_char_size_) / ((char_size_ - 2) * 2);
@@ -418,43 +248,13 @@ public:
 								aa_char_bitmap_2x[y * char_size_ * 2 + x] = static_cast<float>(aa64) / block_sq;
 							}
 						}
-
-						for (uint32_t y = 0; y < char_size_; ++ y)
-						{
-							for (uint32_t x = 0; x < char_size_; ++ x)
-							{
-								aa_char_bitmap[y * char_size_ + x] = (aa_char_bitmap_2x[(y * 2 + 0) * char_size_ * 2 + (x * 2 + 0)]
-									+ aa_char_bitmap_2x[(y * 2 + 0) * char_size_ * 2 + (x * 2 + 1)]
-									+ aa_char_bitmap_2x[(y * 2 + 1) * char_size_ * 2 + (x * 2 + 0)]
-									+ aa_char_bitmap_2x[(y * 2 + 1) * char_size_ * 2 + (x * 2 + 1)]) * 0.25f;
-							}
-						}
 					}
 
-					ComputeGradient(aa_char_bitmap_2x, char_size_, char_size_, grad);
+					ComputeDistance(aa_char_bitmap_2x, char_size_ * 2, char_size_ * 2, dist_data);
 
-					AAEuclideanDistance(aa_char_bitmap, grad, char_size_, char_size_, outside);
-
-					for (size_t i = 0; i < grad.size(); ++ i)
+					for (uint32_t i = 0; i < dist_data.size(); ++ i)
 					{
-						aa_char_bitmap[i] = 1 - aa_char_bitmap[i];
-						grad[i] = -grad[i];
-					}
-
-					AAEuclideanDistance(aa_char_bitmap, grad, char_size_, char_size_, inside);
-
-					for (uint32_t i = 0; i < outside.size(); ++ i)
-					{
-						if (inside[i] < 0)
-						{
-							inside[i] = 0;
-						}
-						if (outside[i] < 0)
-						{
-							outside[i] = 0;
-						}
-
-						float value = (inside[i] - outside[i]) * scale;
+						float value = dist_data[i] * scale;
 
 						char_dist_data_[ci.dist_index + i] = value;
 						*min_value_ = std::min(*min_value_, value);
@@ -484,8 +284,6 @@ private:
 	int32_t* cur_num_char_;
 	std::atomic<int32_t>* cur_package_;
 	uint32_t num_chars_;
-	uint32_t thread_id_;
-	uint32_t num_threads_;
 	uint32_t num_chars_per_package_;
 
 	float* min_value_;
@@ -538,8 +336,7 @@ void compute_distance(std::vector<font_info>& char_info, std::vector<float>& cha
 			joiners[i] = tp(ttf_to_dist(ft_libs[i], ft_faces[i], internal_char_size, char_size,
 				&validate_chars[0], &char_info[0], &char_dist_data[0], cur_num_char[i],
 				cur_package, static_cast<uint32_t>(validate_chars.size()),
-				std::ref(min_values[i]), std::ref(max_values[i]),
-				i, num_threads, 64));
+				std::ref(min_values[i]), std::ref(max_values[i]), 64));
 		}
 	
 		Timer timer;
@@ -638,7 +435,7 @@ void quantizer_chars(std::vector<uint8_t>& lzma_dist, float& mse, quantizer_char
 			mse += d * d;
 		}
 
-		lzma_enc.Encode(char_lzma_dist, &uint8_dist[0], uint8_dist.size());
+		lzma_enc.Encode(char_lzma_dist, uint8_dist);
 		uint64_t len = static_cast<uint64_t>(char_lzma_dist.size());
 
 		lzma_dist.insert(lzma_dist.end(), reinterpret_cast<uint8_t*>(&len), reinterpret_cast<uint8_t*>(&len + 1));
@@ -683,7 +480,7 @@ void quantizer(std::vector<uint8_t>& lzma_dist, uint32_t non_empty_chars,
 		param.char_size_sq = char_size_sq;
 		param.s = s;
 		param.e = e;
-		joiners[i] = tp(std::bind(quantizer_chars, std::ref(lzma_dists[i]), std::ref(mses[i]), param));
+		joiners[i] = tp([&lzma_dists, &mses, param, i] { quantizer_chars(lzma_dists[i], mses[i], param); });
 	}
 
 	float mse = 0;
@@ -707,32 +504,31 @@ int main(int argc, char* argv[])
 	header.non_empty_chars = 0;
 	header.char_size = 32;
 
-	std::string ttf_name;
-	std::string kfont_name;
+	std::filesystem::path ttf_name;
+	std::filesystem::path kfont_name;
 	int start_code;
 	int end_code;
 	int num_threads;
 
 	CPUInfo cpu;
 
-	boost::program_options::options_description desc("Allowed options");
-	desc.add_options()
-		("help,H", "Produce help message")
-		("input-name,I", boost::program_options::value<std::string>(), "Input font name.")
-		("output-name,O", boost::program_options::value<std::string>(), "Output font name. Default is input-name.kfont.")
-		("start-code,S", boost::program_options::value<int>(&start_code)->default_value(0), "Start code. Default is 0.")
-		("end-code,E", boost::program_options::value<int>(&end_code)->default_value(65535), "End code. Default is 65535.")
-		("char-size,C", boost::program_options::value<uint32_t>(&header.char_size)->default_value(32), "Character size. Default is 32.")
-		("threads,T", boost::program_options::value<int>(&num_threads)->default_value(cpu.NumHWThreads()), "Number of Threads. Default is the number of CPU threads.")
-		("version,v", "Version.");
+	cxxopts::Options options("KFontGen", "KlayGE Font Generator");
+	options.add_options()
+		("H,help", "Produce help message.")
+		("I,input-name", "Input font name.", cxxopts::value<std::string>())
+		("O,output-name", "Output file name. (default: input-name.kfont)", cxxopts::value<std::string>())
+		("S,start-code", "Start code. Default is 0.", cxxopts::value<int>(start_code)->default_value("0"))
+		("E,end-code", "End code.", cxxopts::value<int>(end_code)->default_value("65535"))
+		("C,char-size", "Character size.", cxxopts::value<uint32_t>(header.char_size)->default_value("32"))
+		("T,threads", "Number of Threads. (default: The number of CPU threads)", cxxopts::value<int>(num_threads))
+		("V,version", "Version.");
 
-	boost::program_options::variables_map vm;
-	boost::program_options::store(boost::program_options::parse_command_line(argc, argv, desc), vm);
-	boost::program_options::notify(vm);
+	int const argc_backup = argc;
+	auto vm = options.parse(argc, argv);
 
-	if ((argc <= 1) || (vm.count("help") > 0))
+	if ((argc_backup <= 1) || (vm.count("help") > 0))
 	{
-		cout << desc << endl;
+		cout << options.help() << endl;
 		return 1;
 	}
 	if (vm.count("version") > 0)
@@ -747,6 +543,7 @@ int main(int argc, char* argv[])
 	else
 	{
 		cout << "Input font name was not set." << endl;
+		cout << options.help() << endl;
 		return 1;
 	}
 	if (vm.count("output-name") > 0)
@@ -755,7 +552,25 @@ int main(int argc, char* argv[])
 	}
 	else
 	{
-		kfont_name = ttf_name.substr(0, ttf_name.find_last_of('.')) + ".kfont";
+		kfont_name = ttf_name;
+		kfont_name.replace_extension(".kfont");
+	}
+
+	if (vm.count("start-code") == 0)
+	{
+		start_code = 0;
+	}
+	if (vm.count("end-code") == 0)
+	{
+		end_code = 65535;
+	}
+	if (vm.count("char-size") == 0)
+	{
+		header.char_size = 32;
+	}
+	if (vm.count("threads") == 0)
+	{
+		num_threads = cpu.NumHWThreads();
 	}
 
 	std::vector<std::pair<int32_t, int32_t>> char_index;
@@ -769,7 +584,7 @@ int main(int argc, char* argv[])
 		}
 
 		KFont kfont_input;
-		if (kfont_input.Load(kfont_name))
+		if (kfont_input.Load(kfont_name.string()))
 		{
 			if (kfont_input.CharSize() == header.char_size)
 			{
@@ -781,7 +596,7 @@ int main(int argc, char* argv[])
 					{
 						BOOST_ASSERT(offset_adv.first == static_cast<int32_t>(char_index.size()));
 
-						char_index.push_back(std::make_pair(ch, offset_adv.first));
+						char_index.emplace_back(ch, offset_adv.first);
 
 						KFont::font_info const & ci = kfont_input.CharInfo(offset_adv.first);
 						char_info[ch].top = ci.top;
@@ -822,15 +637,10 @@ int main(int argc, char* argv[])
 	cout << "\tCharacter size: " << header.char_size << endl;
 	cout << "\tNumber of threads: " << num_threads << endl;
 	cout << endl;
-	if (cpu.IsFeatureSupport(CPUInfo::CF_SSE2))
-	{
-		cout << "SSE2 is used." << endl;
-	}
-	cout << endl;
 
 	std::vector<uint8_t> ttf;
 	{
-		std::ifstream ttf_input(ttf_name.c_str(), ios_base::binary);
+		std::ifstream ttf_input(ttf_name.string(), ios_base::binary);
 		if (ttf_input)
 		{
 			ttf_input.seekg(0, ios_base::end);
@@ -868,7 +678,7 @@ int main(int argc, char* argv[])
 	{
 		if (char_info[i].dist_index != static_cast<uint32_t>(-1))
 		{
-			char_index.push_back(std::make_pair(static_cast<int32_t>(i), header.non_empty_chars));
+			char_index.emplace_back(static_cast<int32_t>(i), header.non_empty_chars);
 			++ header.non_empty_chars;
 		}
 	}
@@ -879,7 +689,7 @@ int main(int argc, char* argv[])
 	{
 		if ((char_info[i].advance_x != 0) || (char_info[i].advance_y != 0))
 		{
-			advance.push_back(std::make_pair(static_cast<int32_t>(i), std::make_pair(char_info[i].advance_x, char_info[i].advance_y)));
+			advance.emplace_back(static_cast<int32_t>(i), std::make_pair(char_info[i].advance_x, char_info[i].advance_y));
 			++ header.validate_chars;
 		}
 	}
@@ -918,7 +728,7 @@ int main(int argc, char* argv[])
 			unordered_map<int32_t, std::pair<int32_t, uint32_t>> char_index_advance;
 			for (size_t i = 0; i < advance.size(); ++ i)
 			{
-				KLAYGE_EMPLACE(char_index_advance, advance[i].first, std::make_pair(-1, (advance[i].second.second << 16) + advance[i].second.first));
+				char_index_advance.emplace(advance[i].first, std::make_pair(-1, (advance[i].second.second << 16) + advance[i].second.first));
 			}
 			for (size_t i = 0; i < char_index.size(); ++ i)
 			{
@@ -974,6 +784,6 @@ int main(int argc, char* argv[])
 			}
 		}
 
-		kfont_output.Save(kfont_name);
+		kfont_output.Save(kfont_name.string());
 	}
 }

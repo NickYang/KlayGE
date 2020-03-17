@@ -34,63 +34,187 @@
 #pragma once
 
 #if defined(KLAYGE_COMPILER_GCC) || defined(KLAYGE_COMPILER_CLANG)
-	#define __bcount(size)
-	#define __in
-	#define __in_bcount(size)
-	#define __in_ecount(size)
-	#define __in_opt
-	#define __in_ecount_opt(size)
-	#define __in_bcount_opt(size)
-	#define __in_xcount_opt(size) 
-	#define __out
-	#define __out_bcount(size)
-	#define __out_ecount(size)
-	#define __out_opt
-	#define __out_ecount_opt(size)
-	#define __out_ecount_part_opt(size,length)
-	#define __out_bcount_opt(size)
-	#define __inout
-	#define __inout_opt
-	#define __deref_out
-	#define __deref_out_bcount(size)
-	#define __deref_opt_out_bcount(size)
 
-	#define _In_
-	#define _In_z_
-	#define _In_reads_(size)
-	#define _In_reads_opt_(size)
-	#define _In_reads_bytes_(size)
-	#define _In_reads_bytes_opt_(size)
-	#define _In_range_(lb, ub)
-	#define _Out_
-	#define _Out_opt_
-	#define _Out_writes_(size)
-	#define _Out_writes_opt_(size)
-	#define _Out_writes_bytes_(size)
-	#define _Out_writes_bytes_to_(size, count)
+#ifndef __bcount
+	#define __bcount(size)
+#endif
+#ifndef __in
+	#define __in
+#endif
+#ifndef __in_bcount
+	#define __in_bcount(size)
+#endif
+#ifndef __in_ecount
+	#define __in_ecount(size)
+#endif
+#ifndef __in_opt
+	#define __in_opt
+#endif
+#ifndef __in_ecount_opt
+	#define __in_ecount_opt(size)
+#endif
+#ifndef __in_bcount_opt
+	#define __in_bcount_opt(size)
+#endif
+#ifndef __in_xcount_opt
+	#define __in_xcount_opt(size) 
+#endif
+#ifndef __out
+	#define __out
+#endif
+#ifndef __out_bcount
+	#define __out_bcount(size)
+#endif
+#ifndef __out_ecount
+	#define __out_ecount(size)
+#endif
+#ifndef __out_opt
+	#define __out_opt
+#endif
+#ifndef __out_ecount_opt
+	#define __out_ecount_opt(size)
+#endif
+#ifndef __out_ecount_part_opt
+	#define __out_ecount_part_opt(size,length)
+#endif
+#ifndef __out_bcount_opt
+	#define __out_bcount_opt(size)
+#endif
+#ifndef __inout
+	#define __inout
+#endif
+#ifndef __inout_opt
+	#define __inout_opt
+#endif
+#ifndef __deref_out
+	#define __deref_out
+#endif
+#ifndef __deref_out_bcount
+	#define __deref_out_bcount(size)
+#endif
+#ifndef __deref_opt_out_bcount
+	#define __deref_opt_out_bcount(size)
+#endif
+#ifndef __reserved
+	#define __reserved
+#endif
+
+#ifndef _Out_writes_bytes_opt_
 	#define _Out_writes_bytes_opt_(size)
-	#define _Out_writes_to_opt_(size, count)
-	#define _Out_writes_all_opt_(size)
-	#define _Inout_
-	#define _Inout_opt_
-	#define _Inout_updates_bytes_(size)
+#endif
+#ifndef _Inout_opt_bytecount_
 	#define _Inout_opt_bytecount_(size)
-	#define _Outptr_
-	#define _Outptr_result_bytebuffer_(size)
-	#define _Outptr_result_maybenull_
-	#define _Outptr_opt_
-	#define _Outptr_opt_result_maybenull_
-	#define _Outptr_opt_result_bytebuffer_(size)
-	#define _Check_return_
+#endif
+#ifndef _Pre_null_
 	#define _Pre_null_
+#endif
+
+#ifndef _In_
+	#define _In_
+#endif
+#ifndef _In_z_
+	#define _In_z_
+#endif
+#ifndef _In_reads_
+	#define _In_reads_(size)
+#endif
+#ifndef _In_reads_opt_
+	#define _In_reads_opt_(size)
+#endif
+#ifndef _In_reads_bytes_
+	#define _In_reads_bytes_(size)
+#endif
+#ifndef _In_reads_bytes_opt_
+	#define _In_reads_bytes_opt_(size)
+#endif
+#ifndef _In_range_
+	#define _In_range_(lb, ub)
+#endif
+#ifndef _Out_
+	#define _Out_
+#endif
+#ifndef _Out_opt_
+	#define _Out_opt_
+#endif
+#ifndef _Out_writes_
+	#define _Out_writes_(size)
+#endif
+#ifndef _Out_writes_opt_
+	#define _Out_writes_opt_(size)
+#endif
+#ifndef _Out_writes_bytes_
+	#define _Out_writes_bytes_(size)
+#endif
+#ifndef _Out_writes_bytes_to_
+	#define _Out_writes_bytes_to_(size, count)
+#endif
+#ifndef _Out_writes_to_opt_
+	#define _Out_writes_to_opt_(size, count)
+#endif
+#ifndef _Out_writes_all_
+	#define _Out_writes_all_(size)
+#endif
+#ifndef _Out_writes_all_opt_
+	#define _Out_writes_all_opt_(size)
+#endif
+#ifndef _Inout_
+	#define _Inout_
+#endif
+#ifndef _Inout_opt_
+	#define _Inout_opt_
+#endif
+#ifndef _Inout_updates_bytes_
+	#define _Inout_updates_bytes_(size)
+#endif
+#ifndef _Outptr_
+	#define _Outptr_
+#endif
+#ifndef _Outptr_result_bytebuffer_
+	#define _Outptr_result_bytebuffer_(size)
+#endif
+#ifndef _Outptr_result_maybenull_
+	#define _Outptr_result_maybenull_
+#endif
+#ifndef _Outptr_opt_
+	#define _Outptr_opt_
+#endif
+#ifndef _Outptr_opt_result_maybenull_
+	#define _Outptr_opt_result_maybenull_
+#endif
+#ifndef _Outptr_opt_result_bytebuffer_
+	#define _Outptr_opt_result_bytebuffer_(size)
+#endif
+#ifndef _Check_return_
+	#define _Check_return_
+#endif
+#ifndef _Always_
 	#define _Always_(annos)
+#endif
+#ifndef _COM_Outptr_
 	#define _COM_Outptr_
+#endif
+#ifndef _COM_Outptr_opt_
 	#define _COM_Outptr_opt_
+#endif
+#ifndef _COM_Outptr_opt_result_maybenull_
 	#define _COM_Outptr_opt_result_maybenull_
+#endif
+#ifndef _Field_size_
 	#define _Field_size_(size)
+#endif
+#ifndef _Field_size_opt_
 	#define _Field_size_opt_(size)
+#endif
+#ifndef _Field_size_full_
 	#define _Field_size_full_(size)
+#endif
+#ifndef _Field_size_bytes_full_
 	#define _Field_size_bytes_full_(size)
+#endif
+#ifndef _Field_size_full_opt_
+	#define _Field_size_full_opt_(size)
+#endif
+
 #endif
 
 #endif			// _SALWRAPPER_HPP

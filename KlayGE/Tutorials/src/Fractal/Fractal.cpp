@@ -1,5 +1,4 @@
 #include <KlayGE/KlayGE.hpp>
-#include <KFL/ThrowErr.hpp>
 #include <KFL/Util.hpp>
 #include <KlayGE/GraphicsBuffer.hpp>
 #include <KFL/Math.hpp>
@@ -20,8 +19,9 @@
 #include <KlayGE/RenderFactory.hpp>
 #include <KlayGE/InputFactory.hpp>
 
-#include <vector>
+#include <iterator>
 #include <sstream>
+#include <vector>
 
 #include "SampleCommon.hpp"
 #include "Fractal.hpp"
@@ -31,15 +31,16 @@ using namespace KlayGE;
 
 namespace
 {
-	class RenderFractal : public RenderableHelper
+	class RenderFractal : public Renderable
 	{
 	public:
 		RenderFractal()
-			: RenderableHelper(L"Fractal")
+			: Renderable(L"Fractal")
 		{
 			RenderFactory& rf = Context::Instance().RenderFactoryInstance();
 
-			technique_ = SyncLoadRenderEffect("Fractal.fxml")->TechniqueByName("Mandelbrot");
+			effect_ = SyncLoadRenderEffect("Fractal.fxml");
+			technique_ = effect_->TechniqueByName("Mandelbrot");
 
 			float2 pos[] =
 			{
@@ -49,12 +50,12 @@ namespace
 				float2(+1, -1),
 			};
 
-			rl_ = rf.MakeRenderLayout();
-			rl_->TopologyType(RenderLayout::TT_TriangleStrip);
+			rls_[0] = rf.MakeRenderLayout();
+			rls_[0]->TopologyType(RenderLayout::TT_TriangleStrip);
 
 			GraphicsBufferPtr pos_vb = rf.MakeVertexBuffer(BU_Static, EAH_GPU_Read | EAH_Immutable, sizeof(pos), pos);
 
-			rl_->BindVertexStream(pos_vb, std::make_tuple(vertex_element(VEU_Position, 0, EF_GR32F)));
+			rls_[0]->BindVertexStream(pos_vb, VertexElement(VEU_Position, 0, EF_GR32F));
 
 			float3 clr0(0, 0.2f, 0.6f);
 			float3 clr1(0.2f, 1, 0);
@@ -69,8 +70,8 @@ namespace
 				clr1.z() = MathLib::srgb_to_linear(clr1.z());
 			}
 
-			*(technique_->Effect().ParameterByName("clr0")) = clr0;
-			*(technique_->Effect().ParameterByName("clr1")) = clr1;
+			*(effect_->ParameterByName("clr0")) = clr0;
+			*(effect_->ParameterByName("clr1")) = clr1;
 		}
 	};
 
@@ -102,11 +103,6 @@ Fractal::Fractal()
 	ResLoader::Instance().AddPath("../../Tutorials/media/Fractal");
 }
 
-bool Fractal::ConfirmDevice() const
-{
-	return true;
-}
-
 void Fractal::OnCreate()
 {
 	font_ = SyncLoadFont("gkai00mp.kfont");
@@ -115,13 +111,17 @@ void Fractal::OnCreate()
 
 	InputEngine& inputEngine(Context::Instance().InputFactoryInstance().InputEngineInstance());
 	InputActionMap actionMap;
-	actionMap.AddActions(actions, actions + sizeof(actions) / sizeof(actions[0]));
+	actionMap.AddActions(actions, actions + std::size(actions));
 
 	action_handler_t input_handler = MakeSharedPtr<input_signal>();
-	input_handler->connect(std::bind(&Fractal::InputHandler, this, std::placeholders::_1, std::placeholders::_2));
+	input_handler->Connect(
+		[this](InputEngine const & sender, InputAction const & action)
+		{
+			this->InputHandler(sender, action);
+		});
 	inputEngine.ActionMap(actionMap, input_handler);
 
-	UIManager::Instance().Load(ResLoader::Instance().Open("Fractal.uiml"));
+	UIManager::Instance().Load(*ResLoader::Instance().Open("Fractal.uiml"));
 }
 
 void Fractal::OnResize(uint32_t width, uint32_t height)

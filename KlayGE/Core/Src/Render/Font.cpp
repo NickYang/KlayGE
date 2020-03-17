@@ -29,7 +29,6 @@
  */
 
 #include <KlayGE/KlayGE.hpp>
-#include <KFL/ThrowErr.hpp>
 #include <KFL/Util.hpp>
 #include <KFL/Half.hpp>
 #include <KlayGE/RenderLayout.hpp>
@@ -37,15 +36,20 @@
 #include <KlayGE/Viewport.hpp>
 #include <KlayGE/FrameBuffer.hpp>
 #include <KlayGE/Texture.hpp>
+#include <KlayGE/RenderableHelper.hpp>
 #include <KlayGE/RenderEngine.hpp>
 #include <KlayGE/RenderFactory.hpp>
 #include <KlayGE/RenderEffect.hpp>
 #include <KlayGE/Context.hpp>
 #include <KFL/AABBox.hpp>
 #include <KlayGE/ResLoader.hpp>
-#include <KlayGE/SceneObjectHelper.hpp>
+#include <KlayGE/SceneManager.hpp>
+#include <KlayGE/SceneNode.hpp>
 #include <KlayGE/LZMACodec.hpp>
 #include <KlayGE/TransientBuffer.hpp>
+#include <KFL/Hash.hpp>
+#include <KlayGE/App3D.hpp>
+#include <KlayGE/Window.hpp>
 
 #include <algorithm>
 #include <vector>
@@ -56,7 +60,6 @@
 #include <tuple>
 #include <type_traits>
 #include <boost/assert.hpp>
-#include <boost/functional/hash.hpp>
 
 #include <kfont/kfont.hpp>
 
@@ -64,11 +67,11 @@
 
 namespace KlayGE
 {
-	class FontRenderable : public RenderableHelper
+	class FontRenderable : public Renderable
 	{
 	public:
 		explicit FontRenderable(std::shared_ptr<KFont> const & kfl)
-				: RenderableHelper(L"Font"),
+				: Renderable(L"Font"),
 					three_dim_(false),
 					kfont_loader_(kfl),
 					tick_(0)
@@ -77,14 +80,14 @@ namespace KlayGE
 
 			restart_ = rf.RenderEngineInstance().DeviceCaps().primitive_restart_support;
 
-			rl_ = rf.MakeRenderLayout();
+			rls_[0] = rf.MakeRenderLayout();
 			if (restart_)
 			{
-				rl_->TopologyType(RenderLayout::TT_TriangleStrip);
+				rls_[0]->TopologyType(RenderLayout::TT_TriangleStrip);
 			}
 			else
 			{
-				rl_->TopologyType(RenderLayout::TT_TriangleList);
+				rls_[0]->TopologyType(RenderLayout::TT_TriangleList);
 			}
 
 			uint32_t const kfont_char_size = kfont_loader_->CharSize();
@@ -92,33 +95,33 @@ namespace KlayGE
 			RenderEngine const & renderEngine = rf.RenderEngineInstance();
 			RenderDeviceCaps const & caps = renderEngine.DeviceCaps();
 			uint32_t size = std::min<uint32_t>(2048U, std::min<uint32_t>(caps.max_texture_width, caps.max_texture_height)) / kfont_char_size * kfont_char_size;
-			dist_texture_ = rf.MakeTexture2D(size, size, 1, 1, EF_R8, 1, 0, EAH_GPU_Read, nullptr);
-			a_char_texture_ = rf.MakeTexture2D(kfont_char_size, kfont_char_size, 1, 1, EF_R8, 1, 0, EAH_CPU_Write, nullptr);
+			dist_texture_ = rf.MakeTexture2D(size, size, 1, 1, EF_R8, 1, 0, EAH_GPU_Read);
+			a_char_data_.resize(kfont_char_size * kfont_char_size);
 
-			char_free_list_.push_back(std::make_pair(0, size * size / kfont_char_size / kfont_char_size));
+			char_free_list_.emplace_back(0, size * size / kfont_char_size / kfont_char_size);
 
 			effect_ = SyncLoadRenderEffect("Font.fxml");
 			*(effect_->ParameterByName("distance_tex")) = dist_texture_;
 			*(effect_->ParameterByName("distance_base_scale")) = float2(kfont_loader_->DistBase() / 32768.0f * 32 + 1, (kfont_loader_->DistScale() / 32768.0f + 1.0f) * 32);
 
 			half_width_height_ep_ = effect_->ParameterByName("half_width_height");
+			dpi_scale_ep_ = effect_->ParameterByName("dpi_scale");
 			mvp_ep_ = effect_->ParameterByName("mvp");
 
 			uint32_t const INDEX_PER_CHAR = restart_ ? 5 : 6;
 			uint32_t const INIT_NUM_CHAR = 1024;
-			tb_vb_ = MakeSharedPtr<TransientBuffer>(static_cast<uint32_t>(INIT_NUM_CHAR * 4 * sizeof(FontVert)), TransientBuffer::BF_Vertex);
-			tb_ib_ = MakeSharedPtr<TransientBuffer>(static_cast<uint32_t>(INIT_NUM_CHAR * INDEX_PER_CHAR * sizeof(uint16_t)), TransientBuffer::BF_Index);
+			tb_vb_ = MakeUniquePtr<TransientBuffer>(static_cast<uint32_t>(INIT_NUM_CHAR * 4 * sizeof(FontVert)), TransientBuffer::BF_Vertex);
+			tb_ib_ = MakeUniquePtr<TransientBuffer>(static_cast<uint32_t>(INIT_NUM_CHAR * INDEX_PER_CHAR * sizeof(uint16_t)), TransientBuffer::BF_Index);
 
-			rl_->BindVertexStream(tb_vb_->GetBuffer(), std::make_tuple(vertex_element(VEU_Position, 0, EF_BGR32F),
-											vertex_element(VEU_Diffuse, 0, EF_ABGR8),
-											vertex_element(VEU_TextureCoord, 0, EF_GR32F)));
-			rl_->BindIndexStream(tb_ib_->GetBuffer(), EF_R16UI);
+			rls_[0]->BindVertexStream(tb_vb_->GetBuffer(), MakeSpan({VertexElement(VEU_Position, 0, EF_BGR32F),
+				VertexElement(VEU_Diffuse, 0, EF_ABGR8), VertexElement(VEU_TextureCoord, 0, EF_GR32F)}));
+			rls_[0]->BindIndexStream(tb_ib_->GetBuffer(), EF_R16UI);
 
 			pos_aabb_ = AABBox(float3(0, 0, 0), float3(0, 0, 0));
 			tc_aabb_ = AABBox(float3(0, 0, 0), float3(0, 0, 0));
 		}
 
-		RenderTechniquePtr const & GetRenderTechnique() const
+		RenderTechnique* GetRenderTechnique() const override
 		{
 			if (three_dim_)
 			{
@@ -139,13 +142,14 @@ namespace KlayGE
 				float const half_height = re.CurFrameBuffer()->Height() / 2.0f;
 
 				*half_width_height_ep_ = float2(half_width, half_height);
+				*dpi_scale_ep_ = Context::Instance().AppInstance().MainWnd()->DPIScale();
 			}
 
 			tb_vb_->EnsureDataReady();
 			tb_ib_->EnsureDataReady();
 
-			rl_->SetVertexStream(0, tb_vb_->GetBuffer());
-			rl_->BindIndexStream(tb_ib_->GetBuffer(), EF_R16UI);
+			rls_[0]->SetVertexStream(0, tb_vb_->GetBuffer());
+			rls_[0]->BindIndexStream(tb_ib_->GetBuffer(), EF_R16UI);
 		}
 
 		void OnRenderEnd()
@@ -182,11 +186,11 @@ namespace KlayGE
 					++ i;
 				}
 
-				rl_->NumVertices(vert_length / sizeof(FontVert));
-				rl_->StartIndexLocation(ind_offset / sizeof(uint16_t));
-				rl_->NumIndices(ind_length / sizeof(uint16_t));
+				rls_[0]->NumVertices(vert_length / sizeof(FontVert));
+				rls_[0]->StartIndexLocation(ind_offset / sizeof(uint16_t));
+				rls_[0]->NumIndices(ind_length / sizeof(uint16_t));
 
-				re.Render(*this->GetRenderTechnique(), *rl_);
+				re.Render(*this->GetRenderEffect(), *this->GetRenderTechnique(), *rls_[0]);
 			}
 
 			for (size_t i = 0; i < tb_vb_sub_allocs_.size(); ++ i)
@@ -198,7 +202,7 @@ namespace KlayGE
 			this->OnRenderEnd();
 		}
 
-		Size_T<float> CalcSize(std::wstring const & text, float font_size)
+		Size_T<float> CalcSize(std::wstring_view text, float font_size)
 		{
 			this->UpdateTexture(text);
 
@@ -226,7 +230,7 @@ namespace KlayGE
 		}
 
 		void AddText2D(float sx, float sy, float sz,
-			float xScale, float yScale, Color const & clr, std::wstring const & text, float font_size)
+			float xScale, float yScale, Color const & clr, std::wstring_view text, float font_size)
 		{
 			three_dim_ = false;
 
@@ -234,14 +238,14 @@ namespace KlayGE
 		}
 
 		void AddText2D(Rect const & rc, float sz,
-			float xScale, float yScale, Color const & clr, std::wstring const & text, float font_size, uint32_t align)
+			float xScale, float yScale, Color const & clr, std::wstring_view text, float font_size, uint32_t align)
 		{
 			three_dim_ = false;
 
 			this->AddText(rc, sz, xScale, yScale, clr, text, font_size, align);
 		}
 
-		void AddText3D(float4x4 const & mvp, Color const & clr, std::wstring const & text, float font_size)
+		void AddText3D(float4x4 const & mvp, Color const & clr, std::wstring_view text, float font_size)
 		{
 			three_dim_ = true;
 			*mvp_ep_ = mvp;
@@ -251,7 +255,7 @@ namespace KlayGE
 
 	private:
 		void AddText(Rect const & rc, float sz,
-			float xScale, float yScale, Color const & clr, std::wstring const & text, float font_size, uint32_t align)
+			float xScale, float yScale, Color const & clr, std::wstring_view text, float font_size, uint32_t align)
 		{
 			this->UpdateTexture(text);
 
@@ -278,38 +282,30 @@ namespace KlayGE
 				}
 				else
 				{
-					lines.push_back(std::make_pair(0.0f, L""));
+					lines.emplace_back(0.0f, L"");
 				}
 			}
 
-			std::vector<float> sx;
-			sx.reserve(lines.size());
-			std::vector<float> sy;
-			sy.reserve(lines.size());
-
+			std::vector<float> sx(lines.size());
 			if (align & Font::FA_Hor_Left)
 			{
-				sx.resize(lines.size(), rc.left());
+				std::fill(sx.begin(), sx.end(), rc.left());
+			}
+			else if (align & Font::FA_Hor_Right)
+			{
+				std::transform(lines.begin(), lines.end(), sx.begin(),
+					[&rc](std::pair<float, std::wstring> const& p) { return rc.right() - p.first; });
 			}
 			else
 			{
-				if (align & Font::FA_Hor_Right)
-				{
-					for (auto const & p : lines)
-					{
-						sx.push_back(rc.right() - p.first);
-					}
-				}
-				else
-				{
-					// Font::FA_Hor_Center
-					for (auto const & p : lines)
-					{
-						sx.push_back((rc.left() + rc.right()) / 2 - p.first / 2);
-					}
-				}
+				BOOST_ASSERT(align & Font::FA_Hor_Center);
+
+				std::transform(lines.begin(), lines.end(), sx.begin(),
+					[&rc](std::pair<float, std::wstring> const& p) { return (rc.left() + rc.right()) / 2 - p.first / 2; });
 			}
 
+			std::vector<float> sy;
+			sy.reserve(lines.size());
 			if (align & Font::FA_Ver_Top)
 			{
 				for (auto iter = lines.begin(); iter != lines.end(); ++ iter)
@@ -317,23 +313,20 @@ namespace KlayGE
 					sy.push_back(rc.top() + (iter - lines.begin()) * h);
 				}
 			}
+			else if (align & Font::FA_Ver_Bottom)
+			{
+				for (auto iter = lines.begin(); iter != lines.end(); ++ iter)
+				{
+					sy.push_back(rc.bottom() - (lines.size() - (iter - lines.begin())) * h);
+				}
+			}
 			else
 			{
-				if (align & Font::FA_Ver_Bottom)
+				BOOST_ASSERT(align & Font::FA_Ver_Middle);
+
+				for (auto iter = lines.begin(); iter != lines.end(); ++ iter)
 				{
-					for (auto iter = lines.begin(); iter != lines.end(); ++ iter)
-					{
-						sy.push_back(rc.bottom() - (lines.size() - (iter - lines.begin())) * h);
-					}
-				}
-				else
-				{
-					// Font::FA_Ver_Middle
-					for (auto iter = lines.begin(); iter != lines.end(); ++ iter)
-					{
-						sy.push_back((rc.top() + rc.bottom()) / 2
-							- lines.size() * h / 2 + (iter - lines.begin()) * h);
-					}
+					sy.push_back((rc.top() + rc.bottom()) / 2 - lines.size() * h / 2 + (iter - lines.begin()) * h);
 				}
 			}
 
@@ -417,7 +410,7 @@ namespace KlayGE
 		}
 
 		void AddText(float sx, float sy, float sz,
-			float xScale, float yScale, Color const & clr, std::wstring const & text, float font_size)
+			float xScale, float yScale, Color const & clr, std::wstring_view text, float font_size)
 		{
 			this->UpdateTexture(text);
 
@@ -526,7 +519,7 @@ namespace KlayGE
 
 		// 更新纹理，使用LRU算法
 		/////////////////////////////////////////////////////////////////////////////////
-		void UpdateTexture(std::wstring const & text)
+		void UpdateTexture(std::wstring_view text)
 		{
 			++ tick_;
 
@@ -616,7 +609,7 @@ namespace KlayGE
 									{
 										++ freeiter;
 									}
-									char_free_list_.insert(freeiter, std::make_pair(id, id + 1));
+									char_free_list_.emplace(freeiter, id, id + 1);
 
 									cim.erase(chiter);
 									break;
@@ -650,17 +643,11 @@ namespace KlayGE
 						charInfo.rc.bottom()	= charInfo.rc.top() + static_cast<float>(height) / tex_size;
 						charInfo.tick			= tick_;
 
-						{
-							Texture::Mapper mapper(*a_char_texture_, 0, 0, TMA_Write_Only,
-								0, 0, kfont_char_size, kfont_char_size);
-							kl.GetDistanceData(mapper.Pointer<uint8_t>(), mapper.RowPitch(), offset);
-						}
+						kl.GetDistanceData(&a_char_data_[0], kfont_char_size, offset);
+						dist_texture_->UpdateSubresource2D(0, 0, char_pos.x(), char_pos.y(), kfont_char_size, kfont_char_size,
+							&a_char_data_[0], kfont_char_size);
 
-						a_char_texture_->CopyToSubTexture2D(*dist_texture_,
-							0, 0, char_pos.x(), char_pos.y(), kfont_char_size, kfont_char_size,
-							0, 0, 0, 0, kfont_char_size, kfont_char_size);
-
-						KLAYGE_EMPLACE(cim, ch, charInfo);
+						cim.emplace(ch, charInfo);
 					}
 				}
 			}
@@ -701,17 +688,17 @@ namespace KlayGE
 
 		bool three_dim_;
 
-		TransientBufferPtr tb_vb_;
-		TransientBufferPtr tb_ib_;
+		std::unique_ptr<TransientBuffer> tb_vb_;
+		std::unique_ptr<TransientBuffer> tb_ib_;
 		std::vector<SubAlloc> tb_vb_sub_allocs_;
 		std::vector<SubAlloc> tb_ib_sub_allocs_;
 
 		TexturePtr		dist_texture_;
-		TexturePtr		a_char_texture_;
-		RenderEffectPtr	effect_;
+		std::vector<uint8_t> a_char_data_;
 
-		RenderEffectParameterPtr half_width_height_ep_;
-		RenderEffectParameterPtr mvp_ep_;
+		RenderEffectParameter* half_width_height_ep_;
+		RenderEffectParameter* dpi_scale_ep_;
+		RenderEffectParameter* mvp_ep_;
 
 		std::shared_ptr<KFont> kfont_loader_;
 
@@ -736,27 +723,34 @@ namespace
 		};
 
 	public:
-		FontLoadingDesc(std::string const & res_name, uint32_t flag)
+		FontLoadingDesc(std::string_view res_name, uint32_t flag)
 		{
-			font_desc_.res_name = res_name;
+			font_desc_.res_name = std::string(res_name);
 			font_desc_.flag = flag;
 			font_desc_.kfont_loader = MakeSharedPtr<KFont>();
 			font_desc_.kfont = MakeSharedPtr<FontPtr>();
 		}
 
-		uint64_t Type() const
+		uint64_t Type() const override
 		{
 			static uint64_t const type = CT_HASH("FontLoadingDesc");
 			return type;
 		}
 
-		bool StateLess() const
+		bool StateLess() const override
 		{
 			return true;
 		}
 
-		void SubThreadStage()
+		void SubThreadStage() override
 		{
+			std::lock_guard<std::mutex> lock(main_thread_stage_mutex_);
+
+			if (*font_desc_.kfont)
+			{
+				return;
+			}
+
 			ResIdentifierPtr kfont_input = ResLoader::Instance().Open(font_desc_.res_name);
 			font_desc_.kfont_loader->Load(kfont_input);
 
@@ -764,26 +758,22 @@ namespace
 			RenderDeviceCaps const & caps = rf.RenderEngineInstance().DeviceCaps();
 			if (caps.multithread_res_creating_support)
 			{
-				this->MainThreadStage();
+				this->MainThreadStageNoLock();
 			}
 		}
 
-		std::shared_ptr<void> MainThreadStage()
+		void MainThreadStage() override
 		{
-			if (!*font_desc_.kfont)
-			{
-				std::shared_ptr<FontRenderable> fr = MakeSharedPtr<FontRenderable>(font_desc_.kfont_loader);
-				*font_desc_.kfont = MakeSharedPtr<Font>(fr, font_desc_.flag);
-			}
-			return std::static_pointer_cast<void>(*font_desc_.kfont);
+			std::lock_guard<std::mutex> lock(main_thread_stage_mutex_);
+			this->MainThreadStageNoLock();
 		}
 
-		bool HasSubThreadStage() const
+		bool HasSubThreadStage() const override
 		{
 			return true;
 		}
 
-		bool Match(ResLoadingDesc const & rhs) const
+		bool Match(ResLoadingDesc const & rhs) const override
 		{
 			if (this->Type() == rhs.Type())
 			{
@@ -794,7 +784,7 @@ namespace
 			return false;
 		}
 
-		void CopyDataFrom(ResLoadingDesc const & rhs)
+		void CopyDataFrom(ResLoadingDesc const & rhs) override
 		{
 			BOOST_ASSERT(this->Type() == rhs.Type());
 
@@ -805,18 +795,30 @@ namespace
 			font_desc_.kfont = fld.font_desc_.kfont;
 		}
 
-		std::shared_ptr<void> CloneResourceFrom(std::shared_ptr<void> const & resource)
+		std::shared_ptr<void> CloneResourceFrom(std::shared_ptr<void> const & resource) override
 		{
 			return resource;
 		}
 
-		virtual std::shared_ptr<void> Resource() const KLAYGE_OVERRIDE
+		std::shared_ptr<void> Resource() const override
 		{
 			return *font_desc_.kfont;
 		}
 
 	private:
+		void MainThreadStageNoLock()
+		{
+			if (!*font_desc_.kfont)
+			{
+				std::shared_ptr<FontRenderable> fr = MakeSharedPtr<FontRenderable>(font_desc_.kfont_loader);
+				// Use KlayGE:: here to prevent an error on Linux
+				*font_desc_.kfont = MakeSharedPtr<KlayGE::Font>(fr, font_desc_.flag);
+			}
+		}
+
+	private:
 		FontDesc font_desc_;
+		std::mutex main_thread_stage_mutex_;
 	};
 }
 
@@ -827,22 +829,21 @@ namespace KlayGE
 	Font::Font(std::shared_ptr<FontRenderable> const & fr)
 			: font_renderable_(fr)
 	{
-		fso_attrib_ = SceneObject::SOA_Overlay;
+		fsn_attrib_ = SceneNode::SOA_Overlay;
 	}
 
 	Font::Font(std::shared_ptr<FontRenderable> const & fr, uint32_t flags)
-			: font_renderable_(fr)
+			: Font(fr)
 	{
-		fso_attrib_ = SceneObject::SOA_Overlay;
 		if (flags & Font::FS_Cullable)
 		{
-			fso_attrib_ |= SceneObject::SOA_Cullable;
+			fsn_attrib_ |= SceneNode::SOA_Cullable;
 		}
 	}
 
 	// 计算文字大小
 	/////////////////////////////////////////////////////////////////////////////////
-	Size_T<float> Font::CalcSize(std::wstring const & text, float font_size)
+	Size_T<float> Font::CalcSize(std::wstring_view text, float font_size)
 	{
 		if (text.empty())
 		{
@@ -857,7 +858,7 @@ namespace KlayGE
 	// 在指定位置画出文字
 	/////////////////////////////////////////////////////////////////////////////////
 	void Font::RenderText(float sx, float sy, Color const & clr,
-		std::wstring const & text, float font_size)
+		std::wstring_view text, float font_size)
 	{
 		this->RenderText(sx, sy, 0, 1, 1, clr, text, font_size);
 	}
@@ -866,13 +867,13 @@ namespace KlayGE
 	/////////////////////////////////////////////////////////////////////////////////
 	void Font::RenderText(float x, float y, float z,
 		float xScale, float yScale, Color const & clr,
-		std::wstring const & text, float font_size)
+		std::wstring_view text, float font_size)
 	{
 		if (!text.empty())
 		{
-			SceneObjectHelperPtr font_obj = MakeSharedPtr<SceneObjectHelper>(font_renderable_, fso_attrib_);
+			auto font_node = MakeSharedPtr<SceneNode>(MakeSharedPtr<RenderableComponent>(font_renderable_), fsn_attrib_);
 			font_renderable_->AddText2D(x, y, z, xScale, yScale, clr, text, font_size);
-			font_obj->AddToSceneManager();
+			Context::Instance().SceneManagerInstance().OverlayRootNode().AddChild(font_node);
 		}
 	}
 
@@ -880,35 +881,35 @@ namespace KlayGE
 	/////////////////////////////////////////////////////////////////////////////////
 	void Font::RenderText(Rect const & rc, float z,
 		float xScale, float yScale, Color const & clr,
-		std::wstring const & text, float font_size, uint32_t align)
+		std::wstring_view text, float font_size, uint32_t align)
 	{
 		if (!text.empty())
 		{
-			SceneObjectHelperPtr font_obj = MakeSharedPtr<SceneObjectHelper>(font_renderable_, fso_attrib_);
+			auto font_node = MakeSharedPtr<SceneNode>(MakeSharedPtr<RenderableComponent>(font_renderable_), fsn_attrib_);
 			font_renderable_->AddText2D(rc, z, xScale, yScale, clr, text, font_size, align);
-			font_obj->AddToSceneManager();
+			Context::Instance().SceneManagerInstance().OverlayRootNode().AddChild(font_node);
 		}
 	}
 
 	// 在指定位置画出3D的文字
 	/////////////////////////////////////////////////////////////////////////////////
-	void Font::RenderText(float4x4 const & mvp, Color const & clr, std::wstring const & text, float font_size)
+	void Font::RenderText(float4x4 const & mvp, Color const & clr, std::wstring_view text, float font_size)
 	{
 		if (!text.empty())
 		{
-			SceneObjectHelperPtr font_obj = MakeSharedPtr<SceneObjectHelper>(font_renderable_, fso_attrib_);
+			auto font_node = MakeSharedPtr<SceneNode>(MakeSharedPtr<RenderableComponent>(font_renderable_), fsn_attrib_);
 			font_renderable_->AddText3D(mvp, clr, text, font_size);
-			font_obj->AddToSceneManager();
+			Context::Instance().SceneManagerInstance().SceneRootNode().AddChild(font_node);
 		}
 	}
 
 
-	FontPtr SyncLoadFont(std::string const & font_name, uint32_t flags)
+	FontPtr SyncLoadFont(std::string_view font_name, uint32_t flags)
 	{
 		return ResLoader::Instance().SyncQueryT<Font>(MakeSharedPtr<FontLoadingDesc>(font_name, flags));
 	}
 
-	FontPtr ASyncLoadFont(std::string const & font_name, uint32_t flags)
+	FontPtr ASyncLoadFont(std::string_view font_name, uint32_t flags)
 	{
 		// TODO: Make it really async
 		return ResLoader::Instance().SyncQueryT<Font>(MakeSharedPtr<FontLoadingDesc>(font_name, flags));

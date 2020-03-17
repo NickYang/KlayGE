@@ -37,7 +37,7 @@
 
 namespace KlayGE
 {
-	class KLAYGE_CORE_API Fence
+	class KLAYGE_CORE_API Fence : boost::noncopyable
 	{
 	public:
 		enum FenceType
@@ -48,11 +48,7 @@ namespace KlayGE
 		};
 
 	public:
-		virtual ~Fence()
-		{
-		}
-
-		static FencePtr NullObject();
+		virtual ~Fence();
 
 		virtual uint64_t Signal(FenceType ft) = 0;
 		virtual void Wait(uint64_t id) = 0;

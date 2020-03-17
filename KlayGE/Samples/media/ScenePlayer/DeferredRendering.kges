@@ -1,0 +1,72 @@
+<?xml version='1.0'?>
+
+<scene version="1" name="Deferred Rendering" skybox="Lake_CraterLake03_filtered">
+	<light type="point" name="point">
+		<pos v="2 10 0"/>
+		<color v="25.6 30.72 32"/>
+		<fall_off v="1 0 1"/>
+		<scale v="0.1 0.1 0.1"/>
+		<projective name="../ShadowCubeMap/lamp.dds"/>
+		<update>
+			<![CDATA[
+def update(app_time, elapsed_time):
+	return (mul(mul(rotation_z(0.4), rotation_y(app_time / 1.4)), translation(sin(app_time) + 2, 10, 0)).vec, );
+			]]>
+		</update>
+	</light>	
+	<light type="spot" name="red spot">
+		<pos v="0 4 0"/>
+		<dir v="1 0 0"/>
+		<color v="64 0 0"/>
+		<fall_off v="1 0 1"/>
+		<angle outer="0.523599" inner="0.392699"/>
+		<scale v="0.1 0.1 0.1"/>
+		<update>
+			<![CDATA[
+def update(app_time, elapsed_time):
+	cone_radius = sqrt(3) / 3;
+	return (mul(mul(mul(scaling(cone_radius, cone_radius, 1), rotation_x(pi)), rotation_y(app_time * 1000 / 1400)), translation(0, 4, 0)).vec, );
+			]]>
+		</update>
+	</light>
+	<light type="spot" name="green spot">
+		<pos v="0 3.4 0"/>
+		<dir v="-1 0 0"/>
+		<color v="0 64 0"/>
+		<fall_off v="1 0 1"/>
+		<angle outer="0.785398" inner="0.523599"/>
+		<scale v="0.1 0.1 0.1"/>
+		<update>
+			<![CDATA[
+def update(app_time, elapsed_time):
+	cone_radius = 1;
+	return (mul(mul(mul(scaling(cone_radius, cone_radius, 1), rotation_x(0)), rotation_y(-app_time * 1000 / 700)), translation(0, 3.4, 0)).vec, );
+			]]>
+		</update>
+	</light>
+	<light type="spot" name="gi">
+		<attr value="indirect"/>
+		<pos v="0 16 -4.8"/>
+		<dir v="0 0 1"/>
+		<color v="192 188.16 140.16"/>
+		<fall_off v="1 0 1"/>
+		<angle outer="0.523599" inner="0.392699"/>
+		<scale v="0.1 0.1 0.1"/>
+		<update>
+			<![CDATA[
+def update(app_time, elapsed_time):
+	cone_radius = sqrt(3) / 3;
+	return (mul(mul(mul(scaling(cone_radius, cone_radius, 1), rotation_x(pi * 0.13)), rotation_y(sin(app_time * 1000 / 2800) * pi / 6)), translation(0, 16, -4.8)).vec, );
+			]]>
+		</update>
+	</light>
+
+	<model name="sponza" meshml="Sponza/sponza.glb"/>
+
+	<camera>
+		<eye_pos v="-14.5 18 -3"/>
+		<look_at v="-13.6 17.55 -2.8"/>
+		<near_plane s="0.1"/>
+		<far_plane s="500"/>
+	</camera>
+</scene>

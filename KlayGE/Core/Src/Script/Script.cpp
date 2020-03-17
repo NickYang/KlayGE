@@ -29,33 +29,11 @@
  */
 
 #include <KlayGE/KlayGE.hpp>
-#include <KFL/ThrowErr.hpp>
-#include <KFL/Util.hpp>
-
-#include <boost/assert.hpp>
 
 #include <KlayGE/Script.hpp>
 
 namespace KlayGE
 {
-	class NullScriptEngine : public ScriptEngine
-	{
-	public:
-		std::wstring const & Name() const
-		{
-			static std::wstring name(L"Null Script Engine");
-			return name;
-		}
-
-	private:
-		virtual void DoSuspend() KLAYGE_OVERRIDE
-		{
-		}
-		virtual void DoResume() KLAYGE_OVERRIDE
-		{
-		}
-	};
-
 	ScriptModule::ScriptModule()
 	{
 	}
@@ -64,29 +42,11 @@ namespace KlayGE
 	{
 	}
 
-	std::experimental::any ScriptModule::Value(std::string const & /*name*/)
-	{
-		return std::experimental::any();
-	}
 
-	std::experimental::any ScriptModule::Call(std::string const & /*func_name*/, const AnyDataListType& /*args*/)
-	{
-		return std::experimental::any();
-	}
-
-	std::experimental::any ScriptModule::RunString(std::string const & /*script*/)
-	{
-		return std::experimental::any();
-	}
-
-	// 构造函数
-	/////////////////////////////////////////////////////////////////////////////////
 	ScriptEngine::ScriptEngine()
 	{
 	}
 
-	// 析构函数
-	/////////////////////////////////////////////////////////////////////////////////
 	ScriptEngine::~ScriptEngine()
 	{
 	}
@@ -99,19 +59,5 @@ namespace KlayGE
 	void ScriptEngine::Resume()
 	{
 		this->DoResume();
-	}
-
-	// 返回空对象
-	//////////////////////////////////////////////////////////////////////////////////
-	ScriptEnginePtr ScriptEngine::NullObject()
-	{
-		static ScriptEnginePtr obj = MakeSharedPtr<NullScriptEngine>();
-		return obj;
-	}
-
-	ScriptModulePtr ScriptEngine::CreateModule(std::string const & /*name*/)
-	{
-		static ScriptModulePtr obj = MakeSharedPtr<ScriptModule>();
-		return obj;
 	}
 }

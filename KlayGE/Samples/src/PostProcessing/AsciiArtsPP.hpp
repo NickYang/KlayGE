@@ -9,8 +9,8 @@ class AsciiArtsPostProcess : public KlayGE::PostProcess
 public:
 	AsciiArtsPostProcess();
 
-	void InputPin(KlayGE::uint32_t index, KlayGE::TexturePtr const & tex);
-	KlayGE::TexturePtr const & InputPin(KlayGE::uint32_t index) const;
+	void InputPin(KlayGE::uint32_t index, KlayGE::ShaderResourceViewPtr const& srv) override;
+	KlayGE::ShaderResourceViewPtr const& InputPin(KlayGE::uint32_t index) const override;
 
 	void Apply();
 
@@ -18,7 +18,7 @@ private:
 	KlayGE::PostProcessPtr downsampler_;
 	KlayGE::TexturePtr downsample_tex_;
 
-	KlayGE::RenderEffectParameterPtr cell_per_row_line_ep_;
+	KlayGE::RenderEffectParameter* cell_per_row_line_ep_;
 };
 
 #endif		// _ASCIIARTSPP_HPP

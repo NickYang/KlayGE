@@ -26,13 +26,18 @@ namespace KlayGE
 	{
 	public:
 		explicit OGLESGraphicsBuffer(BufferUsage usage, uint32_t access_hint, GLenum target,
-			uint32_t size_in_byte);
+			uint32_t size_in_byte, uint32_t structure_byte_stride);
 		~OGLESGraphicsBuffer();
 
-		void CopyToBuffer(GraphicsBuffer& rhs);
+		void CopyToBuffer(GraphicsBuffer& target) override;
+		void CopyToSubBuffer(GraphicsBuffer& target,
+			uint32_t dst_offset, uint32_t src_offset, uint32_t size) override;
 
-		virtual void CreateHWResource(void const * init_data) KLAYGE_OVERRIDE;
-		virtual void DeleteHWResource() KLAYGE_OVERRIDE;
+		void CreateHWResource(void const * init_data) override;
+		void DeleteHWResource() override;
+		bool HWResourceReady() const override;
+
+		void UpdateSubresource(uint32_t offset, uint32_t size, void const * data) override;
 
 		void Active(bool force);
 
@@ -40,6 +45,7 @@ namespace KlayGE
 		{
 			return vb_;
 		}
+		GLuint RetrieveGLTexture(ElementFormat fmt);
 		GLuint GLType() const
 		{
 			return target_;
@@ -51,6 +57,7 @@ namespace KlayGE
 
 	private:
 		GLuint vb_;
+		GLuint tex_ = 0;
 		GLenum target_;
 		BufferAccess last_ba_;
 		std::vector<uint8_t> buf_data_;

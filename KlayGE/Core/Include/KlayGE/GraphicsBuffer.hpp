@@ -43,8 +43,8 @@
 #pragma once
 
 #include <KlayGE/PreDeclare.hpp>
+#include <atomic>
 #include <vector>
-#include <boost/noncopyable.hpp>
 
 namespace KlayGE
 {
@@ -61,7 +61,7 @@ namespace KlayGE
 		BA_Write_No_Overwrite
 	};
 
-	class KLAYGE_CORE_API GraphicsBuffer
+	class KLAYGE_CORE_API GraphicsBuffer : boost::noncopyable
 	{
 	public:
 		class Mapper : boost::noncopyable
@@ -96,10 +96,8 @@ namespace KlayGE
 		};
 
 	public:
-		GraphicsBuffer(BufferUsage usage, uint32_t access_hint, uint32_t size_in_byte);
+		GraphicsBuffer(BufferUsage usage, uint32_t access_hint, uint32_t size_in_byte, uint32_t structure_byte_stride);
 		virtual ~GraphicsBuffer();
-
-		static GraphicsBufferPtr NullObject();
 
 		uint32_t Size() const
 		{
@@ -116,10 +114,20 @@ namespace KlayGE
 			return access_hint_;
 		}
 
-		virtual void CopyToBuffer(GraphicsBuffer& rhs) = 0;
+		uint32_t StructureByteStride() const
+		{
+			return structure_byte_stride_;
+		}
+
+		virtual void CopyToBuffer(GraphicsBuffer& target) = 0;
+		virtual void CopyToSubBuffer(GraphicsBuffer& target,
+			uint32_t dst_offset, uint32_t src_offset, uint32_t size) = 0;
 
 		virtual void CreateHWResource(void const * init_data) = 0;
 		virtual void DeleteHWResource() = 0;
+		virtual bool HWResourceReady() const = 0;
+
+		virtual void UpdateSubresource(uint32_t offset, uint32_t size, void const * data) = 0;
 
 	private:
 		virtual void* Map(BufferAccess ba) = 0;
@@ -130,6 +138,34 @@ namespace KlayGE
 		uint32_t access_hint_;
 
 		uint32_t size_in_byte_;
+		uint32_t structure_byte_stride_;
+	};
+
+	class KLAYGE_CORE_API SoftwareGraphicsBuffer : public GraphicsBuffer
+	{
+	public:
+		SoftwareGraphicsBuffer(uint32_t size_in_byte, bool ref_only);
+
+		void CopyToBuffer(GraphicsBuffer& target) override;
+		void CopyToSubBuffer(GraphicsBuffer& target,
+			uint32_t dst_offset, uint32_t src_offset, uint32_t size) override;
+
+		void CreateHWResource(void const * init_data) override;
+		void DeleteHWResource() override;
+		bool HWResourceReady() const override;
+
+		void UpdateSubresource(uint32_t offset, uint32_t size, void const * data) override;
+
+	private:
+		void* Map(BufferAccess ba) override;
+		void Unmap() override;
+
+	private:
+		bool ref_only_;
+
+		uint8_t* subres_data_ = nullptr;
+		std::vector<uint8_t> data_block_;
+		std::atomic<bool> mapped_ = false;
 	};
 }
 

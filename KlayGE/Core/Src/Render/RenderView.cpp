@@ -11,109 +11,15 @@
 //////////////////////////////////////////////////////////////////////////////////
 
 #include <KlayGE/KlayGE.hpp>
-#include <KFL/Util.hpp>
 #include <KlayGE/RenderView.hpp>
 
 namespace KlayGE
 {
-	class NullRenderView : public RenderView
-	{
-	public:
-		void ClearColor(Color const & /*clr*/)
-		{
-		}
+	ShaderResourceView::~ShaderResourceView() = default;
 
-		void ClearDepth(float /*depth*/)
-		{
-		}
-		
-		void ClearStencil(int32_t /*stencil*/)
-		{
-		}
+	RenderTargetView::~RenderTargetView() = default;
 
-		void ClearDepthStencil(float /*depth*/, int32_t /*stencil*/)
-		{
-		}
+	DepthStencilView::~DepthStencilView() = default;
 
-		virtual void Discard() KLAYGE_OVERRIDE
-		{
-		}
-
-		void OnAttached(FrameBuffer& /*fb*/, uint32_t /*att*/)
-		{
-		}
-
-		void OnDetached(FrameBuffer& /*fb*/, uint32_t /*att*/)
-		{
-		}
-
-		void OnBind(FrameBuffer& /*fb*/, uint32_t /*att*/)
-		{
-		}
-
-		void OnUnbind(FrameBuffer& /*fb*/, uint32_t /*att*/)
-		{
-		}
-	};
-
-	RenderViewPtr RenderView::NullObject()
-	{
-		static RenderViewPtr obj = MakeSharedPtr<NullRenderView>();
-		return obj;
-	}
-
-	void RenderView::OnBind(FrameBuffer& /*fb*/, uint32_t /*att*/)
-	{
-	}
-	
-	void RenderView::OnUnbind(FrameBuffer& /*fb*/, uint32_t /*att*/)
-	{
-	}
-
-
-	class NullUnorderedAccessView : public UnorderedAccessView
-	{
-	public:
-		void Clear(float4 const & /*val*/)
-		{
-		}
-
-		void Clear(uint4 const & /*val*/)
-		{
-		}
-
-		virtual void Discard() KLAYGE_OVERRIDE
-		{
-		}
-
-		void OnAttached(FrameBuffer& /*fb*/, uint32_t /*att*/)
-		{
-		}
-
-		void OnDetached(FrameBuffer& /*fb*/, uint32_t /*att*/)
-		{
-		}
-
-		void OnBind(FrameBuffer& /*fb*/, uint32_t /*att*/)
-		{
-		}
-
-		void OnUnbind(FrameBuffer& /*fb*/, uint32_t /*att*/)
-		{
-		}
-	};
-
-	UnorderedAccessViewPtr UnorderedAccessView::NullObject()
-	{
-		static UnorderedAccessViewPtr obj = MakeSharedPtr<NullUnorderedAccessView>();
-		return obj;
-	}
-
-	void UnorderedAccessView::OnBind(FrameBuffer& /*fb*/, uint32_t /*att*/)
-	{
-	}
-	
-	void UnorderedAccessView::OnUnbind(FrameBuffer& /*fb*/, uint32_t /*att*/)
-	{
-	}
+	UnorderedAccessView::~UnorderedAccessView() = default;
 }

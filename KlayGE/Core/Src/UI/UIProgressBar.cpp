@@ -20,12 +20,8 @@
 namespace KlayGE
 {
 	UIProgressBar::UIProgressBar(UIDialogPtr const & dialog)
-					: UIControl(UIPolylineEditBox::Type, dialog),
-						progress_(0)
+					: UIProgressBar(UIProgressBar::Type, dialog)
 	{
-		hotkey_ = 0;
-
-		this->InitDefaultElements();
 	}
 
 	UIProgressBar::UIProgressBar(uint32_t type, UIDialogPtr const & dialog)
@@ -34,14 +30,27 @@ namespace KlayGE
 	{
 		hotkey_ = 0;
 
-		this->InitDefaultElements();
+		UIElement Element;
+
+		// Background
+		{
+			Element.TextureColor().States[UICS_Normal] = Color(1.0f, 1.0f, 1.0f, 1.0f);
+			Element.TextureColor().SetState(UICS_Normal);
+			elements_.push_back(MakeUniquePtr<UIElement>(Element));
+		}
+
+		// Bar
+		{
+			Element.TextureColor().States[UICS_Normal] = Color(0.2f, 0.4f, 0.6f, 1.0f);
+			Element.TextureColor().SetState(UICS_Normal);
+			elements_.push_back(MakeUniquePtr<UIElement>(Element));
+		}
 	}
 
 	UIProgressBar::UIProgressBar(UIDialogPtr const & dialog, int ID, int progress, int4 const & coord_size, uint8_t hotkey, bool bIsDefault)
-					: UIControl(UIProgressBar::Type, dialog),
-						progress_(progress)
+					: UIProgressBar(dialog)
 	{
-		this->InitDefaultElements();
+		this->SetValue(progress);
 
 		// Set the ID and list index
 		this->SetID(ID);
@@ -49,25 +58,6 @@ namespace KlayGE
 		this->SetSize(coord_size.z(), coord_size.w());
 		this->SetHotkey(hotkey);
 		this->SetIsDefault(bIsDefault);
-	}
-
-	void UIProgressBar::InitDefaultElements()
-	{
-		UIElement Element;
-
-		// Background
-		{
-			Element.TextureColor().States[UICS_Normal] = Color(1.0f, 1.0f, 1.0f, 1.0f);
-			Element.TextureColor().SetState(UICS_Normal);
-			elements_.push_back(MakeSharedPtr<UIElement>(Element));
-		}
-
-		// Bar
-		{
-			Element.TextureColor().States[UICS_Normal] = Color(0.2f, 0.4f, 0.6f, 1.0f);
-			Element.TextureColor().SetState(UICS_Normal);
-			elements_.push_back(MakeSharedPtr<UIElement>(Element));
-		}
 	}
 
 	void UIProgressBar::SetValue(int value)

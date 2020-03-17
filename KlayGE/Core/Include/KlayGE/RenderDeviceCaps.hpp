@@ -1,31 +1,60 @@
-// RenderDeviceCaps.hpp
-// KlayGE 渲染设备能力类 头文件
-// Ver 2.8.0
-// 版权所有(C) 龚敏敏, 2005
-// Homepage: http://www.klayge.org
-//
-// 2.8.0
-// 初次建立 (2005.7.17)
-//
-// 修改记录
-//////////////////////////////////////////////////////////////////////////////////
+/**
+ * @file RenderDeviceCaps.hpp
+ * @author Minmin Gong
+ *
+ * @section DESCRIPTION
+ *
+ * This source file is part of KlayGE
+ * For the latest info, see http://www.klayge.org
+ *
+ * @section LICENSE
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published
+ * by the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+ *
+ * You may alternatively use this source under the terms of
+ * the KlayGE Proprietary License (KPL). You can obtained such a license
+ * from http://www.klayge.org/licensing/.
+ */
 
-#ifndef _RENDERDEVICECAPS_HPP
-#define _RENDERDEVICECAPS_HPP
+#ifndef KLAYGE_CORE_RENDER_DEVICE_CAPS_HPP
+#define KLAYGE_CORE_RENDER_DEVICE_CAPS_HPP
 
 #pragma once
 
 #include <KlayGE/PreDeclare.hpp>
+#include <KFL/CXX2a/span.hpp>
 #include <KlayGE/ElementFormat.hpp>
 
+#include <map>
+#include <vector>
+
 #include <boost/operators.hpp>
+#if defined(KLAYGE_COMPILER_GCC)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wstrict-aliasing" // Ignore aliasing in flat_tree.hpp
+#endif
+#include <boost/container/flat_map.hpp>
+#if defined(KLAYGE_COMPILER_GCC)
+#pragma GCC diagnostic pop
+#endif
 
 namespace KlayGE
 {
 	enum TessellationMethod
 	{
 		TM_Hardware,
-		TM_Instanced,
 		TM_No
 	};
 
@@ -35,31 +64,31 @@ namespace KlayGE
 		uint8_t major_ver : 6;
 		uint8_t minor_ver : 2;
 
-		ShaderModel()
+		constexpr ShaderModel() noexcept
 			: major_ver(0), minor_ver(0)
 		{
 		}
-		ShaderModel(uint8_t major, uint8_t minor)
+		constexpr ShaderModel(uint8_t major, uint8_t minor) noexcept
 			: major_ver(major), minor_ver(minor)
 		{
 		}
 
-		uint32_t FullVersion() const
+		uint32_t FullVersion() const noexcept
 		{
 			return (major_ver << 2) | minor_ver;
 		}
 
-		bool operator<(ShaderModel const & rhs) const
+		bool operator<(ShaderModel const & rhs) const noexcept
 		{
 			return this->FullVersion() < rhs.FullVersion();
 		}
-		bool operator==(ShaderModel const & rhs) const
+		bool operator==(ShaderModel const & rhs) const noexcept
 		{
 			return this->FullVersion() == rhs.FullVersion();
 		}
 	};
 
-	struct RenderDeviceCaps
+	struct KLAYGE_CORE_API RenderDeviceCaps
 	{
 		ShaderModel max_shader_model;
 
@@ -78,16 +107,11 @@ namespace KlayGE
 
 		bool is_tbdr : 1;
 
-		bool hw_instancing_support : 1;
-		bool instance_id_support : 1;
-		bool stream_output_support : 1;
-		bool alpha_to_coverage_support : 1;
 		bool primitive_restart_support : 1;
 		bool multithread_rendering_support : 1;
 		bool multithread_res_creating_support : 1;
+		bool arbitrary_multithread_rendering_support : 1;
 		bool mrt_independent_bit_depths_support : 1;
-		bool standard_derivatives_support : 1;
-		bool shader_texture_lod_support : 1;
 		bool logic_op_support : 1;
 		bool independent_blend_support : 1;
 		bool depth_texture_support : 1;
@@ -97,6 +121,12 @@ namespace KlayGE
 		bool no_overwrite_support : 1;
 		bool full_npot_texture_support : 1;
 		bool render_to_texture_array_support : 1;
+		bool explicit_multi_sample_support : 1;
+		bool load_from_buffer_support : 1;
+		bool uavs_at_every_stage_support : 1;
+		bool rovs_support : 1;
+		bool flexible_srvs_support : 1;
+		bool vp_rt_index_at_every_stage_support : 1;
 
 		bool gs_support : 1;
 		bool cs_support : 1;
@@ -105,10 +135,47 @@ namespace KlayGE
 
 		TessellationMethod tess_method;
 
-		std::function<bool(ElementFormat)> vertex_format_support;
-		std::function<bool(ElementFormat)> texture_format_support;
-		std::function<bool(ElementFormat, uint32_t, uint32_t)> rendertarget_format_support;
+		bool VertexFormatSupport(ElementFormat format) const;
+		bool TextureFormatSupport(ElementFormat format) const;
+		bool RenderTargetFormatSupport(ElementFormat format, uint32_t sample_count, uint32_t sample_quality) const;
+		bool TextureRenderTargetFormatSupport(ElementFormat format, uint32_t sample_count, uint32_t sample_quality) const;
+		bool UavFormatSupport(ElementFormat format) const;
+
+		ElementFormat BestMatchVertexFormat(std::span<ElementFormat const> formats) const;
+		ElementFormat BestMatchTextureFormat(std::span<ElementFormat const> formats) const;
+		ElementFormat BestMatchRenderTargetFormat(std::span<ElementFormat const> formats,
+			uint32_t sample_count, uint32_t sample_quality) const;
+		ElementFormat BestMatchTextureRenderTargetFormat(std::span<ElementFormat const> formats,
+			uint32_t sample_count, uint32_t sample_quality) const;
+		ElementFormat BestMatchUavFormat(std::span<ElementFormat const> formats) const;
+
+		static constexpr uint32_t EncodeSampleCountQuality(uint32_t sample_count, uint32_t sample_quality) noexcept
+		{
+			return sample_count | (sample_quality << 16);
+		}
+		static constexpr uint32_t DecodeSampleCount(uint32_t encoded) noexcept
+		{
+			return encoded & 0xFFFF;
+		}
+		static constexpr uint32_t DecodeSampleQuality(uint32_t encoded) noexcept
+		{
+			return encoded >> 16;
+		}
+
+		void AssignVertexFormats(std::vector<ElementFormat> vertex_formats);
+		void AssignTextureFormats(std::vector<ElementFormat> texture_formats);
+		void AssignRenderTargetFormats(std::map<ElementFormat, std::vector<uint32_t>> render_target_formats);
+		void AssignUavFormats(std::vector<ElementFormat> uav_formats);
+
+	private:
+		void UpdateSupportBits();
+
+	private:
+		std::vector<ElementFormat> vertex_formats_;
+		std::vector<ElementFormat> texture_formats_;
+		boost::container::flat_map<ElementFormat, std::vector<uint32_t>> render_target_formats_;
+		std::vector<ElementFormat> uav_formats_;
 	};
 }
 
-#endif			// _RENDERDEVICECAPS_HPP
+#endif			// KLAYGE_CORE_RENDER_DEVICE_CAPS_HPP

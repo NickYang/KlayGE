@@ -32,9 +32,6 @@
 #include <KlayGE/Context.hpp>
 #include <KlayGE/InputFactory.hpp>
 #include <KlayGE/Window.hpp>
-#ifdef KLAYGE_PLATFORM_ANDROID
-#include <KlayGE/App3D.hpp>
-#endif
 
 #include <KlayGE/MsgInput/MInput.hpp>
 
@@ -51,28 +48,6 @@ namespace KlayGE
 		static std::wstring const name(L"MsgInput Touch");
 		return name;
 	}
-
-#if (defined KLAYGE_PLATFORM_WINDOWS_DESKTOP) && (_WIN32_WINNT >= _WIN32_WINNT_WIN7)
-	void MsgInputTouch::OnTouch(Window const & wnd, HTOUCHINPUT hti, uint32_t num_inputs)
-	{
-		std::vector<TOUCHINPUT> inputs(num_inputs);
-
-		MsgInputEngine const & mie = *checked_cast<MsgInputEngine const *>(&Context::Instance().InputFactoryInstance().InputEngineInstance());
-
-		if (mie.GetTouchInputInfo(hti, num_inputs, &inputs[0], sizeof(inputs[0])))
-		{
-			for (auto const & ti : inputs)
-			{
-				POINT pt = { TOUCH_COORD_TO_PIXEL(ti.x), TOUCH_COORD_TO_PIXEL(ti.y) };
-				::MapWindowPoints(nullptr, wnd.HWnd(), &pt, 1);
-				touch_coord_state_[ti.dwID] = int2(pt.x, pt.y);
-				touch_down_state_[ti.dwID] = (ti.dwFlags & (TOUCHEVENTF_MOVE | TOUCHEVENTF_DOWN)) ? true : false;
-			}
-
-			mie.CloseTouchInputHandle(hti);
-		}
-	}
-#endif
 
 	void MsgInputTouch::OnPointerDown(int2 const & pt, uint32_t id)
 	{
@@ -135,11 +110,6 @@ namespace KlayGE
 
 	int2 MsgInputTouch::AdjustPoint(int2 const & pt) const
 	{
-#ifdef KLAYGE_PLATFORM_ANDROID
-		WindowPtr const & win = Context::Instance().AppInstance().MainWnd();
-		return pt - int2(win->Left() / 2, win->Top() / 2);
-#else
 		return pt;
-#endif
 	}
 }

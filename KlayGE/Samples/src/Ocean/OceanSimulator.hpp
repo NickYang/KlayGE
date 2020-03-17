@@ -61,13 +61,16 @@ namespace KlayGE
 		TexturePtr omega_tex_;
 
 		TexturePtr out_real_tex_;
+		ShaderResourceViewPtr out_real_srv_;
 		TexturePtr out_imag_tex_;
+		ShaderResourceViewPtr out_imag_srv_;
 		FrameBufferPtr tex_fb_;
 
-		RenderTechniquePtr update_spectrum_tech_;
-		RenderTechniquePtr update_displacement_tech_;
-		RenderTechniquePtr gen_gradient_folding_tech_;
-		RenderEffectParameterPtr time_param_;
+		RenderEffectPtr effect_;
+		RenderTechnique* update_spectrum_tech_;
+		RenderTechnique* update_displacement_tech_;
+		RenderTechnique* gen_gradient_folding_tech_;
+		RenderEffectParameter* time_param_;
 
 		RenderLayoutPtr quad_layout_;
 

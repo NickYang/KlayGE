@@ -37,57 +37,47 @@
 #include <KlayGE/App3D.hpp>
 #include <KlayGE/RenderLayout.hpp>
 #include <KlayGE/Camera.hpp>
+#include <KlayGE/RenderMaterial.hpp>
 #include <KlayGE/Renderable.hpp>
 #include <KlayGE/DeferredRenderingLayer.hpp>
 
 #include <cstring>
+#include <iterator>
 
 #include <KlayGE/RenderableHelper.hpp>
 
 namespace KlayGE
 {
-	RenderableHelper::RenderableHelper(std::wstring const & name)
-		: name_(name)
-	{
-	}
-
-	RenderTechniquePtr const & RenderableHelper::GetRenderTechnique() const
-	{
-		return technique_;
-	}
-
-	RenderLayoutPtr const & RenderableHelper::GetRenderLayout() const
-	{
-		return rl_;
-	}
-
-	AABBox const & RenderableHelper::PosBound() const
-	{
-		return pos_aabb_;
-	}
-
-	AABBox const & RenderableHelper::TexcoordBound() const
-	{
-		return tc_aabb_;
-	}
-
-	std::wstring const & RenderableHelper::Name() const
-	{
-		return name_;
-	}
-
-
 	RenderablePoint::RenderablePoint()
-		: RenderableHelper(L"Point")
+		: Renderable(L"Point")
 	{
-		this->Init();
+		auto& rf = Context::Instance().RenderFactoryInstance();
+
+		effect_ = SyncLoadRenderEffect("RenderableHelper.fxml");
+		technique_ = simple_forward_tech_ = effect_->TechniqueByName("PointTec");
+		v0_ep_ = effect_->ParameterByName("v0");
+		color_ep_ = effect_->ParameterByName("color");
+
+		rls_[0] = rf.MakeRenderLayout();
+		rls_[0]->TopologyType(RenderLayout::TT_PointList);
+
+		float v = 0;
+		auto vb = rf.MakeVertexBuffer(BU_Static, EAH_GPU_Read | EAH_Immutable, sizeof(v), &v);
+		rls_[0]->BindVertexStream(vb, VertexElement(VEU_Position, 0, EF_R32F));
+
+		tc_aabb_ = AABBox(float3(0, 0, 0), float3(0, 0, 0));
+
+		*(effect_->ParameterByName("pos_center")) = float3(0, 0, 0);
+		*(effect_->ParameterByName("pos_extent")) = float3(1, 1, 1);
+
+		effect_attrs_ |= EA_SimpleForward;
+
+		this->UpdateBoundBox();
 	}
 
 	RenderablePoint::RenderablePoint(float3 const & v, Color const & clr)
-		: RenderableHelper(L"Point")
+		: RenderablePoint()
 	{
-		this->Init();
-
 		this->SetPoint(v);
 		this->SetColor(clr);
 	}
@@ -103,49 +93,42 @@ namespace KlayGE
 		*color_ep_ = float4(clr.r(), clr.g(), clr.b(), clr.a());
 	}
 
-	void RenderablePoint::OnRenderBegin()
+
+	RenderableLine::RenderableLine()
+		: Renderable(L"Line")
 	{
-		Camera const & camera = Context::Instance().AppInstance().ActiveCamera();
-		*mvp_param_ = model_mat_ * camera.ViewProjMatrix();
-	}
+		auto& rf = Context::Instance().RenderFactoryInstance();
 
-	void RenderablePoint::Init()
-	{
-		RenderFactory& rf = Context::Instance().RenderFactoryInstance();
+		effect_ = SyncLoadRenderEffect("RenderableHelper.fxml");
+		technique_ = simple_forward_tech_ = effect_->TechniqueByName("LineTec");
+		v0_ep_ = effect_->ParameterByName("v0");
+		v1_ep_ = effect_->ParameterByName("v1");
+		color_ep_ = effect_->ParameterByName("color");
 
-		RenderEffectPtr effect = SyncLoadRenderEffect("RenderableHelper.fxml");
-		technique_ = simple_forward_tech_ = effect->TechniqueByName("PointTec");
-		v0_ep_ = effect->ParameterByName("v0");
-		color_ep_ = effect->ParameterByName("color");
-		mvp_param_ = effect->ParameterByName("mvp");
+		float vertices[] =
+		{
+			0, 1
+		};
 
-		rl_ = rf.MakeRenderLayout();
-		rl_->TopologyType(RenderLayout::TT_PointList);
+		rls_[0] = rf.MakeRenderLayout();
+		rls_[0]->TopologyType(RenderLayout::TT_LineList);
 
-		float v = 0;
-		GraphicsBufferPtr vb = rf.MakeVertexBuffer(BU_Static, EAH_GPU_Read | EAH_Immutable, sizeof(v), &v);
-		rl_->BindVertexStream(vb, std::make_tuple(vertex_element(VEU_Position, 0, EF_R32F)));
+		auto vb = rf.MakeVertexBuffer(BU_Static, EAH_GPU_Read | EAH_Immutable, sizeof(vertices), vertices);
+		rls_[0]->BindVertexStream(vb, VertexElement(VEU_Position, 0, EF_R32F));
 
 		tc_aabb_ = AABBox(float3(0, 0, 0), float3(0, 0, 0));
 
-		*(effect->ParameterByName("pos_center")) = float3(0, 0, 0);
-		*(effect->ParameterByName("pos_extent")) = float3(1, 1, 1);
+		*(effect_->ParameterByName("pos_center")) = float3(0, 0, 0);
+		*(effect_->ParameterByName("pos_extent")) = float3(1, 1, 1);
 
 		effect_attrs_ |= EA_SimpleForward;
-	}
 
-
-	RenderableLine::RenderableLine()
-		: RenderableHelper(L"Line")
-	{
-		this->Init();
+		this->UpdateBoundBox();
 	}
 	
 	RenderableLine::RenderableLine(float3 const & v0, float3 const & v1, Color const & clr)
-		: RenderableHelper(L"Line")
+		: RenderableLine()
 	{
-		this->Init();
-
 		this->SetLine(v0, v1);
 		this->SetColor(clr);
 	}
@@ -156,7 +139,7 @@ namespace KlayGE
 		{
 			v0, v1
 		};
-		pos_aabb_ = MathLib::compute_aabbox(&vs[0], &vs[0] + sizeof(vs) / sizeof(vs[0]));
+		pos_aabb_ = MathLib::compute_aabbox(&vs[0], &vs[0] + std::size(vs));
 		
 		*v0_ep_ = v0;
 		*v1_ep_ = v1;
@@ -167,54 +150,43 @@ namespace KlayGE
 		*color_ep_ = float4(clr.r(), clr.g(), clr.b(), clr.a());
 	}
 
-	void RenderableLine::OnRenderBegin()
-	{
-		Camera const & camera = Context::Instance().AppInstance().ActiveCamera();
-		*mvp_param_ = model_mat_ * camera.ViewProjMatrix();
-	}
 
-	void RenderableLine::Init()
+	RenderableTriangle::RenderableTriangle()
+		: Renderable(L"Triangle")
 	{
-		RenderFactory& rf = Context::Instance().RenderFactoryInstance();
+		auto& rf = Context::Instance().RenderFactoryInstance();
 
-		RenderEffectPtr effect = SyncLoadRenderEffect("RenderableHelper.fxml");
-		technique_ = simple_forward_tech_ = effect->TechniqueByName("LineTec");
-		v0_ep_ = effect->ParameterByName("v0");
-		v1_ep_ = effect->ParameterByName("v1");
-		color_ep_ = effect->ParameterByName("color");
-		mvp_param_ = effect->ParameterByName("mvp");
+		effect_ = SyncLoadRenderEffect("RenderableHelper.fxml");
+		technique_ = simple_forward_tech_ = effect_->TechniqueByName("LineTec");
+		v0_ep_ = effect_->ParameterByName("v0");
+		v1_ep_ = effect_->ParameterByName("v1");
+		v2_ep_ = effect_->ParameterByName("v2");
+		color_ep_ = effect_->ParameterByName("color");
 
 		float vertices[] =
 		{
-			0, 1
+			0, 1, 2
 		};
 
-		rl_ = rf.MakeRenderLayout();
-		rl_->TopologyType(RenderLayout::TT_LineList);
+		rls_[0] = rf.MakeRenderLayout();
+		rls_[0]->TopologyType(RenderLayout::TT_TriangleList);
 
-		GraphicsBufferPtr vb = rf.MakeVertexBuffer(BU_Static, EAH_GPU_Read | EAH_Immutable, sizeof(vertices), vertices);
-		rl_->BindVertexStream(vb, std::make_tuple(vertex_element(VEU_Position, 0, EF_R32F)));
+		auto vb = rf.MakeVertexBuffer(BU_Static, EAH_GPU_Read | EAH_Immutable, sizeof(vertices), vertices);
+		rls_[0]->BindVertexStream(vb, VertexElement(VEU_Position, 0, EF_R32F));
 
 		tc_aabb_ = AABBox(float3(0, 0, 0), float3(0, 0, 0));
 
-		*(effect->ParameterByName("pos_center")) = float3(0, 0, 0);
-		*(effect->ParameterByName("pos_extent")) = float3(1, 1, 1);
+		*(effect_->ParameterByName("pos_center")) = float3(0, 0, 0);
+		*(effect_->ParameterByName("pos_extent")) = float3(1, 1, 1);
 
 		effect_attrs_ |= EA_SimpleForward;
-	}
 
-
-	RenderableTriangle::RenderableTriangle()
-		: RenderableHelper(L"Triangle")
-	{
-		this->Init();
+		this->UpdateBoundBox();
 	}
 
 	RenderableTriangle::RenderableTriangle(float3 const & v0, float3 const & v1, float3 const & v2, Color const & clr)
-		: RenderableHelper(L"Triangle")
+		: RenderableTriangle()
 	{
-		this->Init();
-
 		this->SetTriangle(v0, v1, v2);
 		this->SetColor(clr);
 	}
@@ -225,7 +197,7 @@ namespace KlayGE
 		{
 			v0, v1, v2
 		};
-		pos_aabb_ = MathLib::compute_aabbox(&vs[0], &vs[0] + sizeof(vs) / sizeof(vs[0]));
+		pos_aabb_ = MathLib::compute_aabbox(&vs[0], &vs[0] + std::size(vs));
 		
 		*v0_ep_ = v0;
 		*v1_ep_ = v1;
@@ -237,55 +209,61 @@ namespace KlayGE
 		*color_ep_ = float4(clr.r(), clr.g(), clr.b(), clr.a());
 	}
 
-	void RenderableTriangle::OnRenderBegin()
-	{
-		Camera const & camera = Context::Instance().AppInstance().ActiveCamera();
-		*mvp_param_ = model_mat_ * camera.ViewProjMatrix();
-	}
 
-	void RenderableTriangle::Init()
+	RenderableTriBox::RenderableTriBox()
+		: Renderable(L"TriBox")
 	{
-		RenderFactory& rf = Context::Instance().RenderFactoryInstance();
+		auto& rf = Context::Instance().RenderFactoryInstance();
 
-		RenderEffectPtr effect = SyncLoadRenderEffect("RenderableHelper.fxml");
-		technique_ = simple_forward_tech_ = effect->TechniqueByName("LineTec");
-		v0_ep_ = effect->ParameterByName("v0");
-		v1_ep_ = effect->ParameterByName("v1");
-		v2_ep_ = effect->ParameterByName("v2");
-		color_ep_ = effect->ParameterByName("color");
-		mvp_param_ = effect->ParameterByName("mvp");
+		effect_ = SyncLoadRenderEffect("RenderableHelper.fxml");
+		technique_ = simple_forward_tech_ = effect_->TechniqueByName("LineTec");
+		v0_ep_ = effect_->ParameterByName("v0");
+		v1_ep_ = effect_->ParameterByName("v1");
+		v2_ep_ = effect_->ParameterByName("v2");
+		v3_ep_ = effect_->ParameterByName("v3");
+		v4_ep_ = effect_->ParameterByName("v4");
+		v5_ep_ = effect_->ParameterByName("v5");
+		v6_ep_ = effect_->ParameterByName("v6");
+		v7_ep_ = effect_->ParameterByName("v7");
+		color_ep_ = effect_->ParameterByName("color");
 
 		float vertices[] =
 		{
-			0, 1, 2
+			0, 1, 2, 3, 4, 5, 6, 7
 		};
 
-		rl_ = rf.MakeRenderLayout();
-		rl_->TopologyType(RenderLayout::TT_TriangleList);
+		uint16_t indices[] =
+		{
+			0, 2, 3, 3, 1, 0,
+			5, 7, 6, 6, 4, 5,
+			4, 0, 1, 1, 5, 4,
+			4, 6, 2, 2, 0, 4,
+			2, 6, 7, 7, 3, 2,
+			1, 3, 7, 7, 5, 1
+		};
 
-		GraphicsBufferPtr vb = rf.MakeVertexBuffer(BU_Static, EAH_GPU_Read | EAH_Immutable, sizeof(vertices), vertices);
-		rl_->BindVertexStream(vb, std::make_tuple(vertex_element(VEU_Position, 0, EF_R32F)));
+		rls_[0] = rf.MakeRenderLayout();
+		rls_[0]->TopologyType(RenderLayout::TT_TriangleList);
+
+		auto vb = rf.MakeVertexBuffer(BU_Static, EAH_GPU_Read | EAH_Immutable, sizeof(vertices), vertices);
+		rls_[0]->BindVertexStream(vb, VertexElement(VEU_Position, 0, EF_R32F));
+
+		auto ib = rf.MakeIndexBuffer(BU_Static, EAH_GPU_Read | EAH_Immutable, sizeof(indices), indices);
+		rls_[0]->BindIndexStream(ib, EF_R16UI);
 
 		tc_aabb_ = AABBox(float3(0, 0, 0), float3(0, 0, 0));
 
-		*(effect->ParameterByName("pos_center")) = float3(0, 0, 0);
-		*(effect->ParameterByName("pos_extent")) = float3(1, 1, 1);
+		*(effect_->ParameterByName("pos_center")) = float3(0, 0, 0);
+		*(effect_->ParameterByName("pos_extent")) = float3(1, 1, 1);
 
 		effect_attrs_ |= EA_SimpleForward;
-	}
 
-
-	RenderableTriBox::RenderableTriBox()
-		: RenderableHelper(L"TriBox")
-	{
-		this->Init();
+		this->UpdateBoundBox();
 	}
 
 	RenderableTriBox::RenderableTriBox(OBBox const & obb, Color const & clr)
-		: RenderableHelper(L"TriBox")
+		: RenderableTriBox()
 	{
-		this->Init();
-
 		this->SetBox(obb);
 		this->SetColor(clr);
 	}
@@ -309,28 +287,23 @@ namespace KlayGE
 		*color_ep_ = float4(clr.r(), clr.g(), clr.b(), clr.a());
 	}
 
-	void RenderableTriBox::OnRenderBegin()
+
+	RenderableLineBox::RenderableLineBox()
+		: Renderable(L"LineBox")
 	{
-		Camera const & camera = Context::Instance().AppInstance().ActiveCamera();
-		*mvp_param_ = model_mat_ * camera.ViewProjMatrix();
-	}
+		auto& rf = Context::Instance().RenderFactoryInstance();
 
-	void RenderableTriBox::Init()
-	{		
-		RenderFactory& rf = Context::Instance().RenderFactoryInstance();
-
-		RenderEffectPtr effect = SyncLoadRenderEffect("RenderableHelper.fxml");
-		technique_ = simple_forward_tech_ = effect->TechniqueByName("LineTec");
-		v0_ep_ = effect->ParameterByName("v0");
-		v1_ep_ = effect->ParameterByName("v1");
-		v2_ep_ = effect->ParameterByName("v2");
-		v3_ep_ = effect->ParameterByName("v3");
-		v4_ep_ = effect->ParameterByName("v4");
-		v5_ep_ = effect->ParameterByName("v5");
-		v6_ep_ = effect->ParameterByName("v6");
-		v7_ep_ = effect->ParameterByName("v7");
-		color_ep_ = effect->ParameterByName("color");
-		mvp_param_ = effect->ParameterByName("mvp");
+		effect_ = SyncLoadRenderEffect("RenderableHelper.fxml");
+		technique_ = simple_forward_tech_ = effect_->TechniqueByName("LineTec");
+		v0_ep_ = effect_->ParameterByName("v0");
+		v1_ep_ = effect_->ParameterByName("v1");
+		v2_ep_ = effect_->ParameterByName("v2");
+		v3_ep_ = effect_->ParameterByName("v3");
+		v4_ep_ = effect_->ParameterByName("v4");
+		v5_ep_ = effect_->ParameterByName("v5");
+		v6_ep_ = effect_->ParameterByName("v6");
+		v7_ep_ = effect_->ParameterByName("v7");
+		color_ep_ = effect_->ParameterByName("color");
 
 		float vertices[] =
 		{
@@ -339,43 +312,33 @@ namespace KlayGE
 
 		uint16_t indices[] =
 		{
-			0, 2, 3, 3, 1, 0,
-			5, 7, 6, 6, 4, 5,
-			4, 0, 1, 1, 5, 4,
-			4, 6, 2, 2, 0, 4,
-			2, 6, 7, 7, 3, 2,
-			1, 3, 7, 7, 5, 1
+			0, 1, 1, 3, 3, 2, 2, 0,
+			4, 5, 5, 7, 7, 6, 6, 4,
+			0, 4, 1, 5, 2, 6, 3, 7
 		};
 
-		rl_ = rf.MakeRenderLayout();
-		rl_->TopologyType(RenderLayout::TT_TriangleList);
+		rls_[0] = rf.MakeRenderLayout();
+		rls_[0]->TopologyType(RenderLayout::TT_LineList);
 
-		GraphicsBufferPtr vb = rf.MakeVertexBuffer(BU_Static, EAH_GPU_Read | EAH_Immutable, sizeof(vertices), vertices);
-		rl_->BindVertexStream(vb, std::make_tuple(vertex_element(VEU_Position, 0, EF_R32F)));
+		auto vb = rf.MakeVertexBuffer(BU_Static, EAH_GPU_Read | EAH_Immutable, sizeof(vertices), vertices);
+		rls_[0]->BindVertexStream(vb, VertexElement(VEU_Position, 0, EF_R32F));
 
-		GraphicsBufferPtr ib = rf.MakeIndexBuffer(BU_Static, EAH_GPU_Read | EAH_Immutable, sizeof(indices), indices);
-		rl_->BindIndexStream(ib, EF_R16UI);
+		auto ib = rf.MakeIndexBuffer(BU_Static, EAH_GPU_Read | EAH_Immutable, sizeof(indices), indices);
+		rls_[0]->BindIndexStream(ib, EF_R16UI);
 
 		tc_aabb_ = AABBox(float3(0, 0, 0), float3(0, 0, 0));
 
-		*(effect->ParameterByName("pos_center")) = float3(0, 0, 0);
-		*(effect->ParameterByName("pos_extent")) = float3(1, 1, 1);
+		*(effect_->ParameterByName("pos_center")) = float3(0, 0, 0);
+		*(effect_->ParameterByName("pos_extent")) = float3(1, 1, 1);
 
 		effect_attrs_ |= EA_SimpleForward;
-	}
 
-
-	RenderableLineBox::RenderableLineBox()
-		: RenderableHelper(L"LineBox")
-	{
-		this->Init();
+		this->UpdateBoundBox();
 	}
 	
 	RenderableLineBox::RenderableLineBox(OBBox const & obb, Color const & clr)
-		: RenderableHelper(L"LineBox")
+		: RenderableLineBox()
 	{
-		this->Init();
-
 		this->SetBox(obb);
 		this->SetColor(clr);
 	}
@@ -399,67 +362,15 @@ namespace KlayGE
 		*color_ep_ = float4(clr.r(), clr.g(), clr.b(), clr.a());
 	}
 
-	void RenderableLineBox::OnRenderBegin()
-	{
-		Camera const & camera = Context::Instance().AppInstance().ActiveCamera();
-		*mvp_param_ = model_mat_ * camera.ViewProjMatrix();
-	}
-
-	void RenderableLineBox::Init()
-	{
-		RenderFactory& rf = Context::Instance().RenderFactoryInstance();
-
-		RenderEffectPtr effect = SyncLoadRenderEffect("RenderableHelper.fxml");
-		technique_ = simple_forward_tech_ = effect->TechniqueByName("LineTec");
-		v0_ep_ = effect->ParameterByName("v0");
-		v1_ep_ = effect->ParameterByName("v1");
-		v2_ep_ = effect->ParameterByName("v2");
-		v3_ep_ = effect->ParameterByName("v3");
-		v4_ep_ = effect->ParameterByName("v4");
-		v5_ep_ = effect->ParameterByName("v5");
-		v6_ep_ = effect->ParameterByName("v6");
-		v7_ep_ = effect->ParameterByName("v7");
-		color_ep_ = effect->ParameterByName("color");
-		mvp_param_ = effect->ParameterByName("mvp");
-
-		float vertices[] =
-		{
-			0, 1, 2, 3, 4, 5, 6, 7
-		};
-
-		uint16_t indices[] =
-		{
-			0, 1, 1, 3, 3, 2, 2, 0,
-			4, 5, 5, 7, 7, 6, 6, 4,
-			0, 4, 1, 5, 2, 6, 3, 7
-		};
-
-		rl_ = rf.MakeRenderLayout();
-		rl_->TopologyType(RenderLayout::TT_LineList);
-
-		GraphicsBufferPtr vb = rf.MakeVertexBuffer(BU_Static, EAH_GPU_Read | EAH_Immutable, sizeof(vertices), vertices);
-		rl_->BindVertexStream(vb, std::make_tuple(vertex_element(VEU_Position, 0, EF_R32F)));
-
-		GraphicsBufferPtr ib = rf.MakeIndexBuffer(BU_Static, EAH_GPU_Read | EAH_Immutable, sizeof(indices), indices);
-		rl_->BindIndexStream(ib, EF_R16UI);
-
-		tc_aabb_ = AABBox(float3(0, 0, 0), float3(0, 0, 0));
-
-		*(effect->ParameterByName("pos_center")) = float3(0, 0, 0);
-		*(effect->ParameterByName("pos_extent")) = float3(1, 1, 1);
-
-		effect_attrs_ |= EA_SimpleForward;
-	}
-
 
 	RenderablePlane::RenderablePlane(float length, float width,
 				int length_segs, int width_segs, bool has_tex_coord, bool has_tangent)
-			: RenderableHelper(L"RenderablePlane")
+			: Renderable(L"RenderablePlane")
 	{
 		RenderFactory& rf = Context::Instance().RenderFactoryInstance();
 
-		rl_ = rf.MakeRenderLayout();
-		rl_->TopologyType(RenderLayout::TT_TriangleList);
+		rls_[0] = rf.MakeRenderLayout();
+		rls_[0]->TopologyType(RenderLayout::TT_TriangleList);
 
 		std::vector<int16_t> positions;
 		for (int y = 0; y < width_segs + 1; ++ y)
@@ -484,7 +395,7 @@ namespace KlayGE
 
 		GraphicsBufferPtr pos_vb = rf.MakeVertexBuffer(BU_Static, EAH_GPU_Read | EAH_Immutable,
 			static_cast<uint32_t>(positions.size() * sizeof(positions[0])), &positions[0]);
-		rl_->BindVertexStream(pos_vb, std::make_tuple(vertex_element(VEU_Position, 0, EF_SIGNED_ABGR16)));
+		rls_[0]->BindVertexStream(pos_vb, VertexElement(VEU_Position, 0, EF_SIGNED_ABGR16));
 
 		if (has_tex_coord)
 		{
@@ -508,21 +419,21 @@ namespace KlayGE
 
 			GraphicsBufferPtr tex_vb = rf.MakeVertexBuffer(BU_Static, EAH_GPU_Read | EAH_Immutable,
 				static_cast<uint32_t>(tex_coords.size() * sizeof(tex_coords[0])), &tex_coords[0]);
-			rl_->BindVertexStream(tex_vb, std::make_tuple(vertex_element(VEU_TextureCoord, 0, EF_SIGNED_GR16)));
+			rls_[0]->BindVertexStream(tex_vb, VertexElement(VEU_TextureCoord, 0, EF_SIGNED_GR16));
 		}
 
 		if (has_tangent)
 		{
 			std::vector<uint32_t> tangent(positions.size() / 4);
 			ElementFormat fmt;
-			if (rf.RenderEngineInstance().DeviceCaps().vertex_format_support(EF_ABGR8))
+			if (rf.RenderEngineInstance().DeviceCaps().VertexFormatSupport(EF_ABGR8))
 			{
 				fmt = EF_ABGR8;
 				tangent.assign(tangent.size(), 0x807F7FFE);
 			}
 			else
 			{
-				BOOST_ASSERT(rf.RenderEngineInstance().DeviceCaps().vertex_format_support(EF_ARGB8));
+				BOOST_ASSERT(rf.RenderEngineInstance().DeviceCaps().VertexFormatSupport(EF_ARGB8));
 
 				fmt = EF_ARGB8;
 				tangent.assign(tangent.size(), 0x80FE7F7F);
@@ -530,7 +441,7 @@ namespace KlayGE
 
 			GraphicsBufferPtr tex_vb = rf.MakeVertexBuffer(BU_Static, EAH_GPU_Read | EAH_Immutable,
 				static_cast<uint32_t>(tangent.size() * sizeof(tangent[0])), &tangent[0]);
-			rl_->BindVertexStream(tex_vb, std::make_tuple(vertex_element(VEU_Tangent, 0, fmt)));
+			rls_[0]->BindVertexStream(tex_vb, VertexElement(VEU_Tangent, 0, fmt));
 		}
 
 		std::vector<uint16_t> index;
@@ -550,23 +461,23 @@ namespace KlayGE
 
 		GraphicsBufferPtr ib = rf.MakeIndexBuffer(BU_Static, EAH_GPU_Read | EAH_Immutable,
 			static_cast<uint32_t>(index.size() * sizeof(index[0])), &index[0]);
-		rl_->BindIndexStream(ib, EF_R16UI);
+		rls_[0]->BindIndexStream(ib, EF_R16UI);
 
 		pos_aabb_ = AABBox(float3(-length / 2, -width / 2, 0), float3(+length / 2, +width / 2, 0));
 		tc_aabb_ = AABBox(float3(0, 0, 0), float3(1, 1, 0));
+
+		this->UpdateBoundBox();
 	}
 
 
-	RenderDecal::RenderDecal(TexturePtr const & normal_tex, TexturePtr const & diffuse_tex, float3 const & diffuse_clr,
-			TexturePtr const & specular_tex, float3 const & specular_level, float shininess)
-		: RenderableHelper(L"Decal")
+	RenderDecal::RenderDecal(TexturePtr const & normal_tex, TexturePtr const & albedo_tex,
+			float3 const & albedo_clr, float metalness, float glossiness)
+		: Renderable(L"Decal")
 	{
 		this->BindDeferredEffect(SyncLoadRenderEffect("Decal.fxml"));
 
-		gbuffer_rt0_tech_ = deferred_effect_->TechniqueByName("DecalGBufferAlphaTestRT0Tech");
-		gbuffer_rt1_tech_ = deferred_effect_->TechniqueByName("DecalGBufferAlphaTestRT1Tech");
-		gbuffer_mrt_tech_ = deferred_effect_->TechniqueByName("DecalGBufferAlphaTestMRTTech");
-		technique_ = gbuffer_rt0_tech_;
+		gbuffer_tech_ = effect_->TechniqueByName("DecalGBufferAlphaTestTech");
+		technique_ = gbuffer_tech_;
 
 		pos_aabb_ = AABBox(float3(-1, -1, -1), float3(1, 1, 1));
 		tc_aabb_ = AABBox(float3(0, 0, 0), float3(1, 1, 0));
@@ -588,56 +499,44 @@ namespace KlayGE
 		};
 
 		RenderFactory& rf = Context::Instance().RenderFactoryInstance();
-		rl_ = rf.MakeRenderLayout();
-		rl_->TopologyType(RenderLayout::TT_TriangleList);
+		rls_[0] = rf.MakeRenderLayout();
+		rls_[0]->TopologyType(RenderLayout::TT_TriangleList);
 
 		GraphicsBufferPtr vb = rf.MakeVertexBuffer(BU_Static, EAH_GPU_Read | EAH_Immutable, sizeof(xyzs), xyzs);
-		rl_->BindVertexStream(vb, std::make_tuple(vertex_element(VEU_Position, 0, EF_BGR32F)));
+		rls_[0]->BindVertexStream(vb, VertexElement(VEU_Position, 0, EF_BGR32F));
 
 		GraphicsBufferPtr ib = rf.MakeIndexBuffer(BU_Static, EAH_GPU_Read | EAH_Immutable, sizeof(indices), indices);
-		rl_->BindIndexStream(ib, EF_R16UI);
+		rls_[0]->BindIndexStream(ib, EF_R16UI);
 
-		model_mat_ = float4x4::Identity();
+		this->ModelMatrix(float4x4::Identity());
+
+		mtl_ = MakeSharedPtr<RenderMaterial>();
+		mtl_->Albedo(float4(albedo_clr.x(), albedo_clr.y(), albedo_clr.z(), 1));
+		mtl_->Metalness(metalness);
+		mtl_->Glossiness(glossiness);
+
 		effect_attrs_ |= EA_AlphaTest;
 
-		inv_mv_ep_ = technique_->Effect().ParameterByName("inv_mv");
-		g_buffer_rt0_tex_param_ = deferred_effect_->ParameterByName("g_buffer_rt0_tex");
+		g_buffer_rt0_tex_param_ = effect_->ParameterByName("g_buffer_rt0_tex");
 
-		normal_tex_ = normal_tex;
-		diffuse_tex_ = diffuse_tex;
-		diffuse_clr_ = diffuse_clr;
-		specular_tex_ = specular_tex;
-		specular_level_ = specular_level.x();
-		shininess_ = shininess;
+		mtl_->Texture(RenderMaterial::TS_Normal, rf.MakeTextureSrv(normal_tex));
+		mtl_->Texture(RenderMaterial::TS_Albedo, rf.MakeTextureSrv(albedo_tex));
+
+		this->UpdateBoundBox();
 	}
 
 	void RenderDecal::OnRenderBegin()
 	{
-		RenderableHelper::OnRenderBegin();
+		Renderable::OnRenderBegin();
 
 		auto drl = Context::Instance().DeferredRenderingLayerInstance();
-		RenderEngine& re = Context::Instance().RenderFactoryInstance().RenderEngineInstance();
-		Camera const & camera = *re.CurFrameBuffer()->GetViewport()->camera;
 
-		float4x4 const & view_to_decal = MathLib::inverse(model_mat_ * camera.ViewMatrix());
-					
 		switch (type_)
 		{
-		case PT_OpaqueGBufferRT0:
-		case PT_TransparencyBackGBufferRT0:
-		case PT_TransparencyFrontGBufferRT0:
-		case PT_OpaqueGBufferRT1:
-		case PT_TransparencyBackGBufferRT1:
-		case PT_TransparencyFrontGBufferRT1:
-		case PT_OpaqueGBufferMRT:
-		case PT_TransparencyBackGBufferMRT:
-		case PT_TransparencyFrontGBufferMRT:
-			*diffuse_clr_param_ = float4(diffuse_clr_.x(), diffuse_clr_.y(), diffuse_clr_.z(), static_cast<float>(!!diffuse_tex_));
-			*specular_clr_param_ = float4(specular_level_, specular_level_, specular_level_, static_cast<float>(!!specular_tex_));
-			*shininess_clr_param_ = float2(MathLib::clamp(static_cast<float>(log(shininess_) * INV_LOG_8192), 1e-6f, 0.999f), static_cast<float>(!!shininess_tex_));
-			*shininess_tex_param_ = shininess_tex_;
-			*inv_mv_ep_ = view_to_decal;
-			*opaque_depth_tex_param_ = drl->DepthTex(drl->ActiveViewport());
+		case PT_OpaqueGBuffer:
+		case PT_TransparencyBackGBuffer:
+		case PT_TransparencyFrontGBuffer:
+			*opaque_depth_tex_param_ = drl->ResolvedDepthTex(drl->ActiveViewport());
 			*g_buffer_rt0_tex_param_ = drl->GBufferRT0BackupTex(drl->ActiveViewport());
 			break;
 

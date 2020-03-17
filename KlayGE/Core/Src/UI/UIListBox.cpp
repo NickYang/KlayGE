@@ -23,16 +23,8 @@
 namespace KlayGE
 {
 	UIListBox::UIListBox(UIDialogPtr const & dialog)
-						: UIControl(UIListBox::Type, dialog),
-							scroll_bar_(dialog),
-							sb_width_(16), border_(6), margin_(5), text_height_(0),
-							style_(SINGLE_SELECTION),
-							selected_(-1), sel_start_(0),
-							drag_(false)
+						: UIListBox(UIListBox::Type, dialog)
 	{
-		this->InitDefaultElements();
-
-		this->GetDialog()->InitControl(scroll_bar_);
 	}
 
 	UIListBox::UIListBox(uint32_t type, UIDialogPtr const & dialog)
@@ -43,32 +35,6 @@ namespace KlayGE
 							selected_(-1), sel_start_(0),
 							drag_(false)
 	{
-		this->InitDefaultElements();
-
-		this->GetDialog()->InitControl(scroll_bar_);
-	}
-
-	UIListBox::UIListBox(UIDialogPtr const & dialog, int ID, int4 const & coord_size, STYLE dwStyle)
-						: UIControl(UIListBox::Type, dialog),
-							scroll_bar_(dialog),
-							sb_width_(16), border_(6), margin_(5), text_height_(0),
-							style_(dwStyle),
-							selected_(-1), sel_start_(0),
-							drag_(false)
-
-	{
-		this->InitDefaultElements();
-
-		this->GetDialog()->InitControl(scroll_bar_);
-
-		// Set the ID and position
-		this->SetID(ID);
-		this->SetLocation(coord_size.x(), coord_size.y());
-		this->SetSize(coord_size.z(), coord_size.w());
-	}
-
-	void UIListBox::InitDefaultElements()
-	{
 		UIElement Element;
 
 		// Main
@@ -76,7 +42,7 @@ namespace KlayGE
 			Element.SetTexture(0, UIManager::Instance().ElementTextureRect(UICT_ListBox, 0));
 			Element.SetFont(0, Color(0, 0, 0, 1), Font::FA_Hor_Left | Font::FA_Ver_Top);
 
-			elements_.push_back(MakeSharedPtr<UIElement>(Element));
+			elements_.push_back(MakeUniquePtr<UIElement>(Element));
 		}
 
 		// Selection
@@ -84,8 +50,22 @@ namespace KlayGE
 			Element.SetTexture(0, UIManager::Instance().ElementTextureRect(UICT_ListBox, 1));
 			Element.SetFont(0, Color(1, 1, 1, 1), Font::FA_Hor_Left | Font::FA_Ver_Top);
 
-			elements_.push_back(MakeSharedPtr<UIElement>(Element));
+			elements_.push_back(MakeUniquePtr<UIElement>(Element));
 		}
+
+		this->GetDialog()->InitControl(scroll_bar_);
+	}
+
+	UIListBox::UIListBox(UIDialogPtr const & dialog, int ID, int4 const & coord_size, STYLE dwStyle)
+						: UIListBox(dialog)
+
+	{
+		style_ = dwStyle;
+
+		// Set the ID and position
+		this->SetID(ID);
+		this->SetLocation(coord_size.x(), coord_size.y());
+		this->SetSize(coord_size.z(), coord_size.w());
 	}
 
 	UIListBox::~UIListBox()
@@ -135,12 +115,12 @@ namespace KlayGE
 		return ret;
 	}
 
-	void UIListBox::SetItemData(int nIndex, std::experimental::any const & data)
+	void UIListBox::SetItemData(int nIndex, std::any const & data)
 	{
 		items_[nIndex]->data = data;
 	}
 
-	int UIListBox::AddItem(std::wstring const & strText, std::experimental::any const & data)
+	int UIListBox::AddItem(std::wstring const & strText, std::any const & data)
 	{
 		std::shared_ptr<UIListBoxItem> pNewItem = MakeSharedPtr<UIListBoxItem>();
 		pNewItem->strText = strText;
@@ -156,7 +136,7 @@ namespace KlayGE
 		return ret;
 	}
 
-	void UIListBox::InsertItem(int nIndex, std::wstring const & strText, std::experimental::any const & data)
+	void UIListBox::InsertItem(int nIndex, std::wstring const & strText, std::any const & data)
 	{
 		std::shared_ptr<UIListBoxItem> pNewItem = MakeSharedPtr<UIListBoxItem>();
 		pNewItem->strText = strText;
@@ -612,25 +592,24 @@ namespace KlayGE
 
 	void UIListBox::Render()
 	{
-		UIElementPtr pElement = elements_[0];
-		UIElementPtr pSelElement = elements_[1];
+		auto& main_element = *elements_[0];
+		auto& selection_element = *elements_[1];
 		if (this->GetEnabled())
 		{
-			pElement->TextureColor().SetState(UICS_Normal);
-			pElement->FontColor().SetState(UICS_Normal);
-			pSelElement->TextureColor().SetState(UICS_Normal);
-			pSelElement->FontColor().SetState(UICS_Normal);
+			main_element.TextureColor().SetState(UICS_Normal);
+			main_element.FontColor().SetState(UICS_Normal);
+			selection_element.TextureColor().SetState(UICS_Normal);
+			selection_element.FontColor().SetState(UICS_Normal);
 		}
 		else
 		{
-			pElement->TextureColor().SetState(UICS_Disabled);
-			pElement->FontColor().SetState(UICS_Disabled);
-			pSelElement->TextureColor().SetState(UICS_Disabled);
-			pSelElement->FontColor().SetState(UICS_Disabled);
+			main_element.TextureColor().SetState(UICS_Disabled);
+			main_element.FontColor().SetState(UICS_Disabled);
+			selection_element.TextureColor().SetState(UICS_Disabled);
+			selection_element.FontColor().SetState(UICS_Disabled);
 		}
 
-		this->GetDialog()->DrawSprite(*pElement,
-			IRect(x_, y_, x_ + width_, y_ + height_));
+		this->GetDialog()->DrawSprite(main_element, IRect(x_, y_, x_ + width_, y_ + height_));
 
 		// Render the text
 		if (!items_.empty())
@@ -638,7 +617,7 @@ namespace KlayGE
 			// Find out the height of a single line of text
 			IRect rc = text_rc_;
 			IRect rcSel = selection_rc_;
-			rc.bottom() = static_cast<int32_t>(rc.top() + UIManager::Instance().GetFontSize(pElement->FontIndex()));
+			rc.bottom() = static_cast<int32_t>(rc.top() + UIManager::Instance().GetFontSize(main_element.FontIndex()));
 
 			// Update the line height formation
 			text_height_ = rc.Height();
@@ -700,12 +679,12 @@ namespace KlayGE
 				{
 					rcSel.top() = rc.top();
 					rcSel.bottom() = rc.bottom();
-					this->GetDialog()->DrawSprite(*pSelElement, rcSel);
-					this->GetDialog()->DrawString(pItem->strText, *pSelElement, rc);
+					this->GetDialog()->DrawSprite(selection_element, rcSel);
+					this->GetDialog()->DrawString(pItem->strText, selection_element, rc);
 				}
 				else
 				{
-					this->GetDialog()->DrawString(pItem->strText, *pElement, rc);
+					this->GetDialog()->DrawString(pItem->strText, main_element, rc);
 				}
 
 				rc += int2(0, text_height_);

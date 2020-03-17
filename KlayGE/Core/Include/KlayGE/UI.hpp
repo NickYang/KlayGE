@@ -20,34 +20,15 @@
 #pragma once
 
 #include <KlayGE/PreDeclare.hpp>
+#include <KFL/CXX17/string_view.hpp>
 #include <KFL/Timer.hpp>
 #include <KlayGE/Input.hpp>
+#include <KlayGE/Signal.hpp>
 
 #include <array>
+#include <map>
 
-#ifdef KLAYGE_COMPILER_MSVC
-#pragma warning(push)
-#pragma warning(disable: 4512) // boost::iterators::function_output_iterator<T>::output_proxy doesn't have assignment operator
-#pragma warning(disable: 4913) // User defined binary operator ',' exists but no overload could convert all operands
-#endif
-#include <boost/signals2.hpp>
-#ifdef KLAYGE_COMPILER_MSVC
-#pragma warning(pop)
-#endif
-#ifdef KLAYGE_TS_LIBRARY_ANY_SUPPORT
-	#include <experimental/any>
-#else
-	#include <boost/any.hpp>
-	namespace std
-	{
-		namespace experimental
-		{
-			using boost::any;
-			using boost::any_cast;
-			using boost::bad_any_cast;
-		}
-	}
-#endif
+#include <KFL/CXX17/any.hpp>
 
 namespace KlayGE
 {
@@ -153,7 +134,7 @@ namespace KlayGE
 		UIStatesColor font_color_;
 	};
 
-	class KLAYGE_CORE_API UIControl : public std::enable_shared_from_this<UIControl>
+	class KLAYGE_CORE_API UIControl : public std::enable_shared_from_this<UIControl>, boost::noncopyable
 	{
 	public:
 		UIControl(uint32_t type, UIDialogPtr const & dialog)
@@ -276,26 +257,26 @@ namespace KlayGE
 
 		virtual void SetTextColor(Color const & color)
 		{
-			UIElementPtr const & element = elements_[0];
+			UIElement* element = elements_[0].get();
 			if (element)
 			{
 				element->FontColor().States[UICS_Normal] = color;
 			}
 		}
-		UIElementPtr const & GetElement(uint32_t iElement) const
+		UIElement* GetElement(uint32_t iElement) const
 		{
-			return elements_[iElement];
+			return elements_[iElement].get();
 		}
-		void SetElement(uint32_t iElement, UIElementPtr element)
+		void SetElement(uint32_t iElement, UIElement const & element)
 		{
 			// Make certain the array is this large
 			for (uint32_t i = static_cast<uint32_t>(elements_.size()); i <= iElement; ++ i)
 			{
-				elements_.push_back(MakeSharedPtr<UIElement>());
+				elements_.push_back(MakeUniquePtr<UIElement>());
 			}
 
 			// Update the data
-			*elements_[iElement] = *element;
+			*elements_[iElement] = element;
 		}
 
 		bool GetIsDefault() const
@@ -352,7 +333,7 @@ namespace KlayGE
 		std::weak_ptr<UIDialog> dialog_;    // Parent container
 		uint32_t index_;              // Index within the control list
 
-		std::vector<UIElementPtr> elements_;  // All display elements
+		std::vector<std::unique_ptr<UIElement>> elements_;  // All display elements
 
 	protected:
 		virtual void UpdateRects()
@@ -369,7 +350,7 @@ namespace KlayGE
 		IRect bounding_box_;		// Rectangle defining the active region of the control
 	};
 
-	class KLAYGE_CORE_API UIManager : public std::enable_shared_from_this<UIManager>
+	class KLAYGE_CORE_API UIManager : boost::noncopyable, public std::enable_shared_from_this<UIManager>
 	{
 	public:
 		struct VertexFormat
@@ -396,7 +377,7 @@ namespace KlayGE
 		void Suspend();
 		void Resume();
 
-		void Load(ResIdentifierPtr const & source);
+		void Load(ResIdentifier& source);
 
 		UIDialogPtr MakeDialog(TexturePtr const & control_tex = TexturePtr());
 
@@ -420,7 +401,7 @@ namespace KlayGE
 		{
 			return dialogs_;
 		}
-		UIDialogPtr const & GetDialog(std::string const & id) const;
+		UIDialogPtr const & GetDialog(std::string_view id) const;
 
 		UIDialogPtr const & GetNextDialog(UIDialogPtr const & dialog) const;
 		UIDialogPtr const & GetPrevDialog(UIDialogPtr const & dialog) const;
@@ -478,7 +459,7 @@ namespace KlayGE
 		bool inited_;
 	};
 
-	class KLAYGE_CORE_API UIDialog
+	class KLAYGE_CORE_API UIDialog : boost::noncopyable
 	{
 		friend class UIManager;
 
@@ -665,15 +646,12 @@ namespace KlayGE
 		void MouseWheelHandler(uint32_t buttons, int2 const & pt, int32_t z_delta);
 		void MouseOverHandler(uint32_t buttons, int2 const & pt);
 
+		// Control events
+		bool OnCycleFocus(bool bForward);
+
 	private:
 		bool keyboard_input_;
 		bool mouse_input_;
-
-		// Initialize default Elements
-		void InitDefaultElements();
-
-		// Control events
-		bool OnCycleFocus(bool bForward);
 
 		std::weak_ptr<UIControl> control_focus_;				// The control which has focus
 		std::weak_ptr<UIControl> control_mouse_over_;			// The control which is hovered over
@@ -736,8 +714,6 @@ namespace KlayGE
 		void SetText(std::wstring const & strText);
 
 	protected:
-		virtual void InitDefaultElements();
-
 		std::wstring text_;			// Window text
 	};
 
@@ -774,7 +750,7 @@ namespace KlayGE
 		void SetText(std::wstring const & strText);
 
 	public:
-		typedef boost::signals2::signal<void(UIButton const & sender)> ClickedEvent;
+		typedef Signal::Signal<void(UIButton const & sender)> ClickedEvent;
 		ClickedEvent& OnClickedEvent()
 		{
 			return clicked_event_;
@@ -789,8 +765,6 @@ namespace KlayGE
 		ClickedEvent clicked_event_;
 
 	protected:
-		virtual void InitDefaultElements();
-
 		bool pressed_;
 
 		std::wstring text_;			// Window text
@@ -829,7 +803,7 @@ namespace KlayGE
 		void SetTexture(TexturePtr const & tex);
 
 	public:
-		typedef boost::signals2::signal<void(UITexButton const & sender)> ClickedEvent;
+		typedef Signal::Signal<void(UITexButton const& sender)> ClickedEvent;
 		ClickedEvent& OnClickedEvent()
 		{
 			return clicked_event_;
@@ -844,8 +818,6 @@ namespace KlayGE
 		ClickedEvent clicked_event_;
 
 	protected:
-		virtual void InitDefaultElements();
-
 		bool pressed_;
 
 		size_t tex_index_;
@@ -894,7 +866,7 @@ namespace KlayGE
 		void SetText(std::wstring const & strText);
 
 	public:
-		typedef boost::signals2::signal<void(UICheckBox const & sender)> ChangedEvent;
+		typedef Signal::Signal<void(UICheckBox const& sender)> ChangedEvent;
 		ChangedEvent& OnChangedEvent()
 		{
 			return changed_event_;
@@ -910,7 +882,6 @@ namespace KlayGE
 
 	protected:
 		virtual void SetCheckedInternal(bool bChecked);
-		virtual void InitDefaultElements();
 
 		bool checked_;
 		IRect button_rc_;
@@ -973,7 +944,7 @@ namespace KlayGE
 		void SetText(std::wstring const & strText);
 
 	public:
-		typedef boost::signals2::signal<void(UIRadioButton const & sender)> ChangedEvent;
+		typedef Signal::Signal<void(UIRadioButton const& sender)> ChangedEvent;
 		ChangedEvent& OnChangedEvent()
 		{
 			return changed_event_;
@@ -989,7 +960,6 @@ namespace KlayGE
 
 	protected:
 		virtual void SetCheckedInternal(bool bChecked, bool bClearGroup);
-		virtual void InitDefaultElements();
 
 		uint32_t button_group_;
 
@@ -1049,7 +1019,7 @@ namespace KlayGE
 		void SetRange(int nMin, int nMax);
 
 	public:
-		typedef boost::signals2::signal<void(UISlider const & sender)> ValueChangedEvent;
+		typedef Signal::Signal<void(UISlider const& sender)> ValueChangedEvent;
 		ValueChangedEvent& OnValueChangedEvent()
 		{
 			return value_changed_event_;
@@ -1065,8 +1035,6 @@ namespace KlayGE
 		ValueChangedEvent value_changed_event_;
 
 	protected:
-		virtual void InitDefaultElements();
-
 		void SetValueInternal(int nValue);
 		int ValueFromPos(int x);
 
@@ -1138,8 +1106,6 @@ namespace KlayGE
 		void MouseUpHandler(UIDialog const & sender, uint32_t buttons, int2 const & pt);
 
 	protected:
-		virtual void InitDefaultElements();
-
 		// ARROWSTATE indicates the state of the arrow buttons.
 		enum ARROWSTATE
 		{
@@ -1174,7 +1140,7 @@ namespace KlayGE
 	struct KLAYGE_CORE_API UIListBoxItem
 	{
 		std::wstring strText;
-		std::experimental::any data;
+		std::any data;
 
 		IRect  rcActive;
 		bool  bSelected;
@@ -1240,9 +1206,9 @@ namespace KlayGE
 			margin_ = margin;
 		}
 		int AddItem(std::wstring const & strText);
-		void SetItemData(int nIndex, std::experimental::any const & data);
-		int AddItem(std::wstring const & strText, std::experimental::any const & data);
-		void InsertItem(int nIndex, std::wstring const & strText, std::experimental::any const & data);
+		void SetItemData(int nIndex, std::any const & data);
+		int AddItem(std::wstring const & strText, std::any const & data);
+		void InsertItem(int nIndex, std::wstring const & strText, std::any const & data);
 		void RemoveItem(int nIndex);
 		void RemoveAllItems();
 
@@ -1255,7 +1221,7 @@ namespace KlayGE
 		void SelectItem(int nNewIndex);
 
 	public:
-		typedef boost::signals2::signal<void(UIListBox const & sender)> SelectionEvent;
+		typedef Signal::Signal<void(UIListBox const& sender)> SelectionEvent;
 		SelectionEvent& OnSelectionEvent()
 		{
 			return selection_event_;
@@ -1277,8 +1243,6 @@ namespace KlayGE
 		SelectionEvent selection_end_event_;
 
 	protected:
-		virtual void InitDefaultElements();
-
 		IRect text_rc_;      // Text rendering bound
 		IRect selection_rc_; // Selection box bound
 		UIScrollBar scroll_bar_;
@@ -1297,7 +1261,7 @@ namespace KlayGE
 	struct UIComboBoxItem
 	{
 		std::wstring strText;
-		std::experimental::any data;
+		std::any data;
 
 		IRect  rcActive;
 		bool  bVisible;
@@ -1330,14 +1294,14 @@ namespace KlayGE
 		virtual void UpdateRects();
 
 		int AddItem(std::wstring const & strText);
-		void SetItemData(int nIndex, std::experimental::any const & data);
-		int AddItem(std::wstring const & strText, std::experimental::any const & data);
+		void SetItemData(int nIndex, std::any const & data);
+		int AddItem(std::wstring const & strText, std::any const & data);
 		void RemoveAllItems();
 		void RemoveItem(uint32_t index);
 		bool ContainsItem(std::wstring const & strText, uint32_t iStart = 0) const;
 		int FindItem(std::wstring const & strText, uint32_t iStart = 0) const;
-		std::experimental::any const GetItemData(std::wstring const & strText) const;
-		std::experimental::any const GetItemData(int nIndex) const;
+		std::any const GetItemData(std::wstring const & strText) const;
+		std::any const GetItemData(int nIndex) const;
 		void SetDropHeight(uint32_t nHeight)
 		{
 			drop_height_ = nHeight;
@@ -1353,7 +1317,7 @@ namespace KlayGE
 			this->UpdateRects();
 		}
 
-		std::experimental::any const GetSelectedData() const;
+		std::any const GetSelectedData() const;
 		std::shared_ptr<UIComboBoxItem> GetSelectedItem() const;
 		int GetSelectedIndex() const;
 
@@ -1376,7 +1340,7 @@ namespace KlayGE
 			{
 				std::shared_ptr<UIComboBoxItem> pItem = items_[i];
 
-				if (std::experimental::any_cast<T>(pItem->data) == data)
+				if (std::any_cast<T>(pItem->data) == data)
 				{
 					this->SetSelectedByIndex(static_cast<uint32_t>(i));
 				}
@@ -1384,7 +1348,7 @@ namespace KlayGE
 		}
 
 	public:
-		typedef boost::signals2::signal<void(UIComboBox const & sender)> SelectionChangedEvent;
+		typedef Signal::Signal<void(UIComboBox const& sender)> SelectionChangedEvent;
 		SelectionChangedEvent& OnSelectionChangedEvent()
 		{
 			return selection_changed_event_;
@@ -1401,8 +1365,6 @@ namespace KlayGE
 		SelectionChangedEvent selection_changed_event_;
 
 	protected:
-		virtual void InitDefaultElements();
-
 		int     selected_;
 		int     focused_;
 		int     drop_height_;
@@ -1423,7 +1385,7 @@ namespace KlayGE
 	};
 
 	// UniBuffer class for the edit control
-	class KLAYGE_CORE_API UniBuffer
+	class KLAYGE_CORE_API UniBuffer : boost::noncopyable
 	{
 	public:
 		explicit UniBuffer(int nInitialSize = 1);
@@ -1546,7 +1508,7 @@ namespace KlayGE
 		}
 
 	public:
-		typedef boost::signals2::signal<void(UIEditBox const & sender)> EditBoxEvent;
+		typedef Signal::Signal<void(UIEditBox const& sender)> EditBoxEvent;
 		EditBoxEvent& OnChangedEvent()
 		{
 			return changed_event_;
@@ -1568,8 +1530,6 @@ namespace KlayGE
 		EditBoxEvent string_event_;
 
 	protected:
-		virtual void InitDefaultElements();
-
 		void PlaceCaret(int nCP);
 		void DeleteSelectionText();
 		void ResetCaretBlink();
@@ -1596,7 +1556,7 @@ namespace KlayGE
 		// Mouse-specific
 		bool mouse_drag_;       // True to indicate drag in progress
 
-		boost::signals2::connection on_char_connect_;
+		Signal::Connection on_char_connect_;
 
 		// Static
 		static bool hide_caret_;   // If true, we don't render the caret.
@@ -1654,11 +1614,10 @@ namespace KlayGE
 		void MouseOverHandler(UIDialog const & sender, uint32_t buttons, int2 const & pt);
 
 	protected:
-		virtual void InitDefaultElements();
-		static const int BACKGROUND_INDEX = 0;
-		static const int COORDLINE_INDEX = 1;
-		static const int POLYLINE_INDEX = 2;
-		static const int CTRLPOINTS_INDEX = 3;
+		static int constexpr BACKGROUND_INDEX = 0;
+		static int constexpr COORDLINE_INDEX = 1;
+		static int constexpr POLYLINE_INDEX = 2;
+		static int constexpr CTRLPOINTS_INDEX = 3;
 
 	protected:
 		std::vector<float2> ctrl_points_;
@@ -1695,9 +1654,8 @@ namespace KlayGE
 		int GetValue() const;
 
 	protected:
-		virtual void InitDefaultElements();
-		static const int BACKGROUND_INDEX = 0;
-		static const int BAR_INDEX = 1;
+		static int constexpr BACKGROUND_INDEX = 0;
+		static int constexpr BAR_INDEX = 1;
 
 	protected:
 		int progress_;

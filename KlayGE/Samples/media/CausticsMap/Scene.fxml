@@ -4,11 +4,10 @@
 	<include name="util.fxml"/>
 	<include name="Quaternion.fxml"/>
 	<include name="Lighting.fxml"/>
-	
-	<parameter type="float4x4" name="model"/>
-	<parameter type="float4x4" name="mvp"/>
-	<parameter type="float3" name="pos_center"/>
-	<parameter type="float3" name="pos_extent"/>
+	<include name="Material.fxml"/>
+	<include name="Mesh.fxml"/>
+	<include name="ModelCamera.fxml"/>
+
 	<parameter type="float2" name="far_plane"/>
 
 	<shader>
@@ -19,7 +18,7 @@ void DepthTexWODTVS(float4 pos : POSITION,
 {
 	pos = float4(pos.xyz * pos_extent + pos_center, 1);
 
-	oPos = mul(pos, mvp);
+	oPos = mul(pos, cameras[0].mvp);
 	oDepth = oPos.w;
 }  
 
@@ -33,7 +32,7 @@ void PosTexVS(float4 pos : POSITION,
 {
 	pos = float4(pos.xyz * pos_extent + pos_center, 1);
 
-	oPos = mul(pos, mvp);
+	oPos = mul(pos, cameras[0].mvp);
 }
 
 float4 PosTexPS() : SV_Target
@@ -73,7 +72,7 @@ void PosNormTexVS(float4 pos : POSITION,
 {
 	pos = float4(pos.xyz * pos_extent + pos_center, 1);
 
-	oPos = mul(pos, mvp);
+	oPos = mul(pos, cameras[0].mvp);
 	oNormal = mul(transform_quat(float3(0, 0, 1), tangent_quat * 2 - 1), (float3x3)model);
 }
 
@@ -139,8 +138,6 @@ float4 PosNormTexPS(float3 normal : TEXCOORD0) : SV_Target
 	<parameter type="float3" name="light_falloff"/>
 	<parameter type="float4x4" name="light_vp"/>
 
-	<parameter type="texture2D" name="diffuse_tex"/>
-	<parameter type="texture2D" name="normal_tex"/>
 	<parameter type="texture3D" name="distance_tex"/>
 
 	<parameter type="sampler" name="linear_sampler">
@@ -189,7 +186,7 @@ void DistanceMappingVS(float4 pos		: POSITION,
 {
 	pos = float4(pos.xyz * pos_extent + pos_center, 1);
 	
-	oPos = mul(pos, mvp);
+	oPos = mul(pos, cameras[0].mvp);
 
 	tangent_quat = tangent_quat * 2 - 1;
 
@@ -215,10 +212,10 @@ void DistanceMappingVS(float4 pos		: POSITION,
 
 float4 DistanceMappingShading(float3 L, float3 V, float3 H, float3 diffuse, float3 normal)
 {
-	float atten = attenuation_term(0, -L.xyz, light_falloff);
+	float atten = AttenuationTerm(0, -L.xyz, light_falloff);
 	float3 light_vec = normalize(L);
 	float3 halfway_vec = normalize(H);
-	return float4(atten * light_color * calc_brdf(diffuse, 0.2f, 16, light_vec, halfway_vec, normal), 1);
+	return float4(atten * light_color * CalcBRDFShading(diffuse, 0.2f, 16, light_vec, halfway_vec, normal), 1);
 }
 
 float4 DistanceMappingPS(float4 L	: TEXCOORD0,
@@ -244,10 +241,8 @@ float4 DistanceMappingPS(float4 L	: TEXCOORD0,
 		discard;
 	}
 
-#if KLAYGE_DERIVATIVES
 	float2 dx = ddx(texCoord0.xy);
 	float2 dy = ddy(texCoord0.xy);
-#endif
 
 	//roughly hack only for this demo, in order to correct shadow for distance mapping
 	float3 deltaUV = normalize(float3(texUV.xy, 0.5f)) - normalize(float3(texCoord0.xy, 0.5f));
@@ -264,13 +259,8 @@ float4 DistanceMappingPS(float4 L	: TEXCOORD0,
 	lookup_uv += float2(delta.x, -KLAYGE_FLIPPING * delta.y);
 	float4 caustics = float4(caustics_tex.Sample(linear_border_sampler, lookup_uv).xyz, 1);
 
-#if KLAYGE_DERIVATIVES
-	float3 diffuse = diffuse_tex.SampleGrad(linear_sampler, texUV.xy, dx, dy).rgb;
+	float3 diffuse = albedo_tex.SampleGrad(linear_sampler, texUV.xy, dx, dy).rgb;
 	float3 bump_normal = decompress_normal(normal_tex.SampleGrad(linear_sampler, texUV.xy, dx, dy));
-#else
-	float3 diffuse = diffuse_tex.Sample(linear_sampler, texUV.xy).rgb;
-	float3 bump_normal = decompress_normal(normal_tex.Sample(linear_sampler, texUV.xy));
-#endif
 	return DistanceMappingShading(L.xyz, V.xyz, H.xyz, diffuse, bump_normal) * atten + caustics;
 }
 
@@ -311,7 +301,7 @@ float4 DistanceMappingPS_20(float4 L	: TEXCOORD0,
 	lookup_uv += float2(delta.x, -KLAYGE_FLIPPING * delta.y);
 	float4 caustics = float4(caustics_tex.Sample(linear_border_sampler, lookup_uv).xyz, 1);
 
-	float3 diffuse = diffuse_tex.Sample(linear_sampler, texUV.xy).rgb;
+	float3 diffuse = albedo_tex.Sample(linear_sampler, texUV.xy).rgb;
 	float3 bump_normal = decompress_normal(normal_tex.Sample(linear_sampler, texUV.xy));
 	return DistanceMappingShading(L.xyz, V.xyz, H.xyz, diffuse, bump_normal) * atten + caustics;
 }
@@ -354,7 +344,7 @@ void RefractEffectVS(float4 position : POSITION, float4 tangent_quat : TANGENT,
 {
 	position = float4(position.xyz * pos_extent + pos_center, 1);
 	
-	hPos = mul(float4(position.xyz, 1), mvp);
+	hPos = mul(float4(position.xyz, 1), cameras[0].mvp);
 	wPosition = mul(float4(position.xyz, 1), model).xyz;
 	wNormal = mul(transform_quat(float3(0, 0, 1), tangent_quat * 2 - 1), (float3x3)model);
 	wViewVec = normalize(wPosition - eye_pos);
@@ -367,7 +357,7 @@ float4 RefractEffectPS(float3 wPosition : TEXCOORD0, float3 wNormal : TEXCOORD1,
 
 	float3 refract_vec = refract(wViewVec, wNormal, refract_idx.y);
 	float3 reflect_vec = reflect(wViewVec, wNormal);
-	float fresnel_term = fresnel_term_schlick(-wViewVec, wNormal, 0.0977f).x;
+	float fresnel_term = FresnelTerm(-wViewVec, wNormal, 0.0977f).x;
 
 	float3 reflected_clr = env_cube.Sample(trilinear_sampler, float3(reflect_vec.x, -KLAYGE_FLIPPING * reflect_vec.y, reflect_vec.z)).xyz;
 

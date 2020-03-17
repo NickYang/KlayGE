@@ -21,7 +21,8 @@
 //////////////////////////////////////////////////////////////////////////////////
 
 #include <KlayGE/KlayGE.hpp>
-#include <KFL/ThrowErr.hpp>
+#include <KFL/CXX17.hpp>
+#include <KFL/ErrorHandling.hpp>
 #include <KFL/Util.hpp>
 #include <KFL/Math.hpp>
 #include <KlayGE/SceneManager.hpp>
@@ -31,19 +32,14 @@
 #include <KlayGE/RenderEngine.hpp>
 #include <KlayGE/App3D.hpp>
 #include <KlayGE/Window.hpp>
+#include <KFL/CXX2a/span.hpp>
 
+#include <iterator>
 #include <map>
+#include <string>
+#include <system_error>
+
 #include <boost/assert.hpp>
-#if defined(KLAYGE_COMPILER_GCC)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations" // Ignore auto_ptr declaration
-#endif
-#include <boost/algorithm/string/split.hpp>
-#if defined(KLAYGE_COMPILER_GCC)
-#pragma GCC diagnostic pop
-#endif
-#include <boost/algorithm/string/trim.hpp>
-#include <boost/lexical_cast.hpp>
 
 #include <glloader/glloader.h>
 
@@ -57,57 +53,67 @@ namespace KlayGE
 	{
 		// Store info
 		name_				= name;
-		width_				= settings.width;
-		height_				= settings.height;
 		isFullScreen_		= settings.full_screen;
 		color_bits_ = NumFormatBits(settings.color_fmt);
 
 		WindowPtr const & main_wnd = Context::Instance().AppInstance().MainWnd();
-		on_exit_size_move_connect_ = main_wnd->OnExitSizeMove().connect(std::bind(&OGLRenderWindow::OnExitSizeMove, this,
-			std::placeholders::_1));
-		on_size_connect_ = main_wnd->OnSize().connect(std::bind(&OGLRenderWindow::OnSize, this,
-			std::placeholders::_1, std::placeholders::_2));
-
-		std::vector<std::pair<std::string, std::pair<int, int>>> available_versions;
-		available_versions.push_back(std::make_pair("4.5", std::make_pair(4, 5)));
-		available_versions.push_back(std::make_pair("4.4", std::make_pair(4, 4)));
-		available_versions.push_back(std::make_pair("4.3", std::make_pair(4, 3)));
-		available_versions.push_back(std::make_pair("4.2", std::make_pair(4, 2)));
-		available_versions.push_back(std::make_pair("4.1", std::make_pair(4, 1)));
-		available_versions.push_back(std::make_pair("4.0", std::make_pair(4, 0)));
-		available_versions.push_back(std::make_pair("3.3", std::make_pair(3, 3)));
-		available_versions.push_back(std::make_pair("3.2", std::make_pair(3, 2)));
-		available_versions.push_back(std::make_pair("3.1", std::make_pair(3, 1)));
-		available_versions.push_back(std::make_pair("3.0", std::make_pair(3, 0)));
-
-		std::vector<std::string> strs;
-		boost::algorithm::split(strs, settings.options, boost::is_any_of(","));
-		for (size_t index = 0; index < strs.size(); ++ index)
-		{
-			std::string& opt = strs[index];
-			boost::algorithm::trim(opt);
-			std::string::size_type loc = opt.find(':');
-			std::string opt_name = opt.substr(0, loc);
-			std::string opt_val = opt.substr(loc + 1);
-
-			if ("version" == opt_name)
+		on_exit_size_move_connect_ = main_wnd->OnExitSizeMove().Connect(
+			[this](Window const & win)
 			{
-				size_t feature_index = 0;
-				for (size_t i = 0; i < available_versions.size(); ++ i)
+				this->OnExitSizeMove(win);
+			});
+		on_size_connect_ = main_wnd->OnSize().Connect(
+			[this](Window const & win, bool active)
+			{
+				this->OnSize(win, active);
+			});
+
+		float const dpi_scale = main_wnd->DPIScale();
+		width_ = static_cast<uint32_t>(settings.width * dpi_scale + 0.5f);
+		height_ = static_cast<uint32_t>(settings.height * dpi_scale + 0.5f);
+
+		static std::pair<int, int> constexpr all_versions[] =
+		{
+			std::make_pair(4, 6),
+			std::make_pair(4, 5),
+			std::make_pair(4, 4),
+			std::make_pair(4, 3),
+			std::make_pair(4, 2),
+			std::make_pair(4, 1)
+		};
+
+		std::span<std::pair<int, int> const> available_versions;
+		{
+			static std::string_view const all_version_names[] =
+			{
+				"4.6",
+				"4.5",
+				"4.4",
+				"4.3",
+				"4.2",
+				"4.1"
+			};
+			KLAYGE_STATIC_ASSERT(std::size(all_version_names) == std::size(all_versions));
+
+			uint32_t version_start_index = 0;
+			for (size_t index = 0; index < settings.options.size(); ++ index)
+			{
+				std::string_view opt_name = settings.options[index].first;
+				std::string_view opt_val = settings.options[index].second;
+				if ("version" == opt_name)
 				{
-					if (available_versions[i].first == opt_val)
+					for (uint32_t i = version_start_index; i < std::size(all_version_names); ++ i)
 					{
-						feature_index = i;
-						break;
+						if (all_version_names[i] == opt_val)
+						{
+							version_start_index = i;
+							break;
+						}
 					}
 				}
-
-				if (feature_index > 0)
-				{
-					available_versions.erase(available_versions.begin(),
-						available_versions.begin() + feature_index);
-				}
 			}
+
+			available_versions = MakeSpan(all_versions).subspan(version_start_index);
 		}
 
 #if defined KLAYGE_PLATFORM_WINDOWS
@@ -136,8 +142,8 @@ namespace KlayGE
 		else
 		{
 			// Get colour depth from display
-			top_ = settings.top;
-			left_ = settings.left;
+			left_ = main_wnd->Left();
+			top_ = main_wnd->Top();
 
 			style = WS_OVERLAPPEDWINDOW;
 		}
@@ -149,87 +155,151 @@ namespace KlayGE
 		::SetWindowPos(hWnd_, nullptr, settings.left, settings.top, rc.right - rc.left, rc.bottom - rc.top,
 			SWP_SHOWWINDOW | SWP_NOZORDER);
 
-		// there is no guarantee that the contents of the stack that become
-		// the pfd are zeroed, therefore _make sure_ to clear these bits.
-		PIXELFORMATDESCRIPTOR pfd;
-		memset(&pfd, 0, sizeof(pfd));
-		pfd.nSize		= sizeof(pfd);
-		pfd.nVersion	= 1;
-		pfd.dwFlags		= PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER;
-		if (STM_LCDShutter == settings.stereo_method)
-		{
-			pfd.dwFlags |= PFD_STEREO;
-		}
-		pfd.iPixelType	= PFD_TYPE_RGBA;
-		pfd.cColorBits	= static_cast<BYTE>(color_bits_);
-		pfd.cDepthBits	= static_cast<BYTE>(depth_bits);
-		pfd.cStencilBits = static_cast<BYTE>(stencil_bits);
-		pfd.iLayerType	= PFD_MAIN_PLANE;
-
-		int pixelFormat = ::ChoosePixelFormat(hDC_, &pfd);
-		BOOST_ASSERT(pixelFormat != 0);
-
-		::SetPixelFormat(hDC_, pixelFormat, &pfd);
-
-		OGLRenderEngine& re = *checked_cast<OGLRenderEngine*>(&Context::Instance().RenderFactoryInstance().RenderEngineInstance());
-
-		hRC_ = re.wglCreateContext(hDC_);
-		re.wglMakeCurrent(hDC_, hRC_);
+		auto& re = checked_cast<OGLRenderEngine&>(Context::Instance().RenderFactoryInstance().RenderEngineInstance());
 
 		uint32_t sample_count = settings.sample_count;
-
-		if (sample_count > 1)
+		int requested_pixel_format = -1;
+		PIXELFORMATDESCRIPTOR requested_pfd{};
 		{
+			WNDCLASSEXW wc;
+			wc.cbSize = sizeof(wc);
+			wc.style = CS_OWNDC;
+			wc.lpfnWndProc = DefWindowProc;
+			wc.cbClsExtra = 0;
+			wc.cbWndExtra = sizeof(this);
+			wc.hInstance = ::GetModuleHandle(nullptr);
+			wc.hIcon = nullptr;
+			wc.hCursor = ::LoadCursor(nullptr, IDC_ARROW);
+			wc.hbrBackground = static_cast<HBRUSH>(::GetStockObject(BLACK_BRUSH));
+			wc.lpszMenuName = nullptr;
+			wc.lpszClassName = L"DummyWindow";
+			wc.hIconSm = nullptr;
+			::RegisterClassExW(&wc);
+
+			HWND dummy_wnd = ::CreateWindowW(wc.lpszClassName, L"", WS_OVERLAPPEDWINDOW, 0, 0, 1, 1, 0, 0, wc.hInstance, nullptr);
+			HDC dummy_dc = ::GetDC(dummy_wnd);
+
+			PIXELFORMATDESCRIPTOR pfd;
+			memset(&pfd, 0, sizeof(pfd));
+			pfd.nSize = sizeof(pfd);
+			pfd.nVersion = 1;
+			pfd.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER;
+			pfd.iPixelType = PFD_TYPE_RGBA;
+			pfd.cColorBits = static_cast<BYTE>(color_bits_);
+			pfd.cDepthBits = static_cast<BYTE>(depth_bits);
+			pfd.cStencilBits = static_cast<BYTE>(stencil_bits);
+			pfd.iLayerType = PFD_MAIN_PLANE;
+
+			int dummy_pixel_format = ::ChoosePixelFormat(dummy_dc, &pfd);
+			BOOST_ASSERT(dummy_pixel_format != 0);
+
+			::SetPixelFormat(dummy_dc, dummy_pixel_format, &pfd);
+
+			HGLRC dummy_rc = re.wglCreateContext(dummy_dc);
+			re.wglMakeCurrent(dummy_dc, dummy_rc);
+
+			auto color_fmt = settings.color_fmt;
+			if (color_fmt == EF_A2BGR10)
+			{
+				// TODO: Figure out why A2BGR10 doesn't work
+				color_fmt = EF_ABGR16F;
+			}
+
+			int r_bits, g_bits, b_bits, a_bits;
+			switch (color_fmt)
+			{
+			case EF_ARGB8:
+			case EF_ABGR8:
+				r_bits = 8;
+				g_bits = 8;
+				b_bits = 8;
+				a_bits = 8;
+				break;
+
+			case EF_A2BGR10:
+				r_bits = 10;
+				g_bits = 10;
+				b_bits = 10;
+				a_bits = 2;
+				break;
+
+			case EF_ABGR16F:
+				r_bits = 16;
+				g_bits = 16;
+				b_bits = 16;
+				a_bits = 16;
+				break;
+
+			default:
+				KFL_UNREACHABLE("Invalid color format");
+			}
+
+			int pixel_format;
 			UINT num_formats;
 			float float_attrs[] = { 0, 0 };
 			BOOL valid;
 			do
 			{
-				int int_attrs[] =
+				std::vector<int> int_attrs =
 				{
 					WGL_DRAW_TO_WINDOW_ARB, GL_TRUE,
 					WGL_SUPPORT_OPENGL_ARB, GL_TRUE,
 					WGL_ACCELERATION_ARB, WGL_FULL_ACCELERATION_ARB,
-					WGL_COLOR_BITS_ARB, static_cast<int>(color_bits_),
+					WGL_RED_BITS_ARB, r_bits,
+					WGL_GREEN_BITS_ARB, g_bits,
+					WGL_BLUE_BITS_ARB, b_bits,
+					WGL_ALPHA_BITS_ARB, a_bits,
 					WGL_DEPTH_BITS_ARB, static_cast<int>(depth_bits),
 					WGL_STENCIL_BITS_ARB, static_cast<int>(stencil_bits),
-					WGL_DOUBLE_BUFFER_ARB, GL_TRUE,
-					WGL_SAMPLE_BUFFERS_ARB, GL_TRUE,
-					WGL_SAMPLES_ARB, static_cast<int>(sample_count),
-					0, 0
+					WGL_DOUBLE_BUFFER_ARB, GL_TRUE
 				};
 
-				valid = wglChoosePixelFormatARB(hDC_, int_attrs, float_attrs, 1, &pixelFormat, &num_formats);
-				if (!valid || (num_formats < 1))
+				if (IsFloatFormat(color_fmt))
+				{
+					int_attrs.push_back(WGL_PIXEL_TYPE_ARB);
+					int_attrs.push_back(WGL_TYPE_RGBA_FLOAT_ARB);
+				}
+				if (sample_count > 1)
+				{
+					int_attrs.push_back(WGL_SAMPLE_BUFFERS_ARB);
+					int_attrs.push_back(GL_TRUE);
+					int_attrs.push_back(WGL_SAMPLES_ARB);
+					int_attrs.push_back(static_cast<int>(sample_count));
+				}
+				if (settings.stereo_method == STM_LCDShutter)
+				{
+					int_attrs.push_back(WGL_STEREO_ARB);
+					int_attrs.push_back(GL_TRUE);
+				}
+				int_attrs.push_back(0);
+				int_attrs.push_back(0);
+
+				valid = wglChoosePixelFormatARB(dummy_dc, &int_attrs[0], float_attrs, 1, &pixel_format, &num_formats);
+				if (valid && (num_formats > 0))
+				{
+					break;
+				}
+				else
 				{
 					-- sample_count;
 				}
-			} while ((sample_count > 1) && (!valid || (num_formats < 1)));
+			} while (sample_count > 0);
 
-			if (valid && (sample_count > 1))
+			if (valid && (sample_count > 0))
 			{
-				re.wglMakeCurrent(hDC_, nullptr);
-				re.wglDeleteContext(hRC_);
-				::ReleaseDC(hWnd_, hDC_);
+				requested_pixel_format = pixel_format;
+				requested_pfd = pfd;
 
-				main_wnd->Recreate();
-
-				hWnd_ = main_wnd->HWnd();
-				hDC_ = ::GetDC(hWnd_);
-
-				::SetWindowLongPtrW(hWnd_, GWL_STYLE, style);
-				::SetWindowPos(hWnd_, nullptr, settings.left, settings.top, rc.right - rc.left, rc.bottom - rc.top,
-					SWP_SHOWWINDOW | SWP_NOZORDER);
-
-				::SetPixelFormat(hDC_, pixelFormat, &pfd);
-
-				hRC_ = re.wglCreateContext(hDC_);
-				re.wglMakeCurrent(hDC_, hRC_);
-
-				// reinit glloader
-				glloader_init();
+				re.wglMakeCurrent(dummy_dc, nullptr);
+				re.wglDeleteContext(dummy_rc);
+				::ReleaseDC(dummy_wnd, dummy_dc);
+				::DestroyWindow(dummy_wnd);
 			}
 		}
+
+		::SetPixelFormat(hDC_, requested_pixel_format, &requested_pfd);
+		hRC_ = re.wglCreateContext(hDC_);
+		re.wglMakeCurrent(hDC_, hRC_);
 
 		if (glloader_WGL_ARB_create_context())
 		{
@@ -238,12 +308,18 @@ namespace KlayGE
 			flags |= WGL_CONTEXT_DEBUG_BIT_ARB;
 #endif
 
-			int attribs[] = { WGL_CONTEXT_MAJOR_VERSION_ARB, 0, WGL_CONTEXT_MINOR_VERSION_ARB, 0,
-				WGL_CONTEXT_FLAGS_ARB, flags, WGL_CONTEXT_PROFILE_MASK_ARB, WGL_CONTEXT_CORE_PROFILE_BIT_ARB, 0 };
-			for (size_t i = 0; i < available_versions.size(); ++ i)
+			int attribs[] =
 			{
-				attribs[1] = available_versions[i].second.first;
-				attribs[3] = available_versions[i].second.second;
+				WGL_CONTEXT_MAJOR_VERSION_ARB, 0,
+				WGL_CONTEXT_MINOR_VERSION_ARB, 0,
+				WGL_CONTEXT_FLAGS_ARB, flags,
+				WGL_CONTEXT_PROFILE_MASK_ARB, WGL_CONTEXT_CORE_PROFILE_BIT_ARB,
+				0
+			};
+			for (int i = 0; i < available_versions.size(); ++ i)
+			{
+				attribs[1] = available_versions[i].first;
+				attribs[3] = available_versions[i].second;
 				HGLRC hRC_new = wglCreateContextAttribsARB(hDC_, nullptr, attribs);
 				if (hRC_new != nullptr)
 				{
@@ -269,8 +345,8 @@ namespace KlayGE
 		}
 		else
 		{
-			top_ = settings.top;
-			left_ = settings.left;
+			left_ = main_wnd->Left();
+			top_ = main_wnd->Top();
 		}
 
 		x_display_ = main_wnd->XDisplay();
@@ -290,11 +366,16 @@ namespace KlayGE
 
 		if (glloader_GLX_ARB_create_context())
 		{
-			int attribs[] = { GLX_CONTEXT_MAJOR_VERSION_ARB, 0, GLX_CONTEXT_MINOR_VERSION_ARB, 0, 0 };
-			for (size_t i = 0; i < available_versions.size(); ++ i)
+			int attribs[] =
 			{
-				attribs[1] = available_versions[i].second.first;
-				attribs[3] = available_versions[i].second.second;
+				GLX_CONTEXT_MAJOR_VERSION_ARB, 0,
+				GLX_CONTEXT_MINOR_VERSION_ARB, 0,
+				0
+			};
+			for (int i = 0; i < available_versions.size(); ++ i)
+			{
+				attribs[1] = available_versions[i].first;
+				attribs[3] = available_versions[i].second;
 				GLXContext x_context_new = glXCreateContextAttribsARB(x_display_, nullptr, nullptr, GL_TRUE, attribs);
 				if (x_context_new != nullptr)
 				{
@@ -311,7 +392,7 @@ namespace KlayGE
 				}
 			}
 		}
-#elif defined KLAYGE_PLATFORM_DARWIN	
+#elif defined KLAYGE_PLATFORM_DARWIN
 		if (isFullScreen_)
 		{
 			left_ = 0;
@@ -319,8 +400,8 @@ namespace KlayGE
 		}
 		else
 		{
-			left_ = settings.left;
-			top_ = settings.top;
+			left_ = main_wnd->Left();
+			top_ = main_wnd->Top();
 		}
 		
 		main_wnd->CreateGLView(settings);
@@ -329,32 +410,16 @@ namespace KlayGE
 		uint32_t sample_count = settings.sample_count;
 #endif
 
-		if (!glloader_GL_VERSION_3_0()
-			&& (!glloader_GL_VERSION_2_1()
-				|| !(glloader_GL_ARB_framebuffer_object()
-					|| (glloader_GL_EXT_framebuffer_object()
-						&& glloader_GL_EXT_framebuffer_blit()))))
+		if (!glloader_GL_VERSION_4_1())
 		{
-			THR(errc::function_not_supported);
+			TERRC(std::errc::function_not_supported);
 		}
 
-		if (glloader_GL_VERSION_3_0())
-		{
-			glClampColor(GL_CLAMP_VERTEX_COLOR, GL_FALSE);
-			glClampColor(GL_CLAMP_FRAGMENT_COLOR, GL_FALSE);
-			glClampColor(GL_CLAMP_READ_COLOR, GL_FALSE);
-		}
-		else if (glloader_GL_ARB_color_buffer_float())
-		{
-			glClampColorARB(GL_CLAMP_VERTEX_COLOR_ARB, GL_FALSE);
-			glClampColorARB(GL_CLAMP_FRAGMENT_COLOR_ARB, GL_FALSE);
-			glClampColorARB(GL_CLAMP_READ_COLOR_ARB, GL_FALSE);
-		}
+		glClampColor(GL_CLAMP_VERTEX_COLOR, GL_FALSE);
+		glClampColor(GL_CLAMP_FRAGMENT_COLOR, GL_FALSE);
+		glClampColor(GL_CLAMP_READ_COLOR, GL_FALSE);
 
-		if (glloader_GL_VERSION_3_2() || glloader_GL_ARB_seamless_cube_map())
-		{
-			glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
-		}
+		glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
 
 #if defined KLAYGE_PLATFORM_WINDOWS
 		if (glloader_WGL_EXT_swap_control())
@@ -371,10 +436,10 @@ namespace KlayGE
 		glPixelStorei(GL_PACK_ALIGNMENT, 1);
 		glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 
-		viewport_->left = 0;
-		viewport_->top = 0;
-		viewport_->width = width_;
-		viewport_->height = height_;
+		viewport_->Left(0);
+		viewport_->Top(0);
+		viewport_->Width(width_);
+		viewport_->Height(height_);
 
 		std::wstring vendor, renderer, version;
 		Convert(vendor, reinterpret_cast<char const *>(glGetString(GL_VENDOR)));
@@ -383,14 +448,14 @@ namespace KlayGE
 		description_ = vendor + L" " + renderer + L" " + version;
 		if (sample_count > 1)
 		{
-			description_ += L" (" + boost::lexical_cast<std::wstring>(sample_count) + L"x AA)";
+			description_ += L" (" + std::to_wstring(sample_count) + L"x AA)";
 		}
 	}
 
 	OGLRenderWindow::~OGLRenderWindow()
 	{
-		on_exit_size_move_connect_.disconnect();
-		on_size_connect_.disconnect();
+		on_exit_size_move_connect_.Disconnect();
+		on_size_connect_.Disconnect();
 
 		this->Destroy();
 	}
@@ -408,11 +473,8 @@ namespace KlayGE
 		height_ = height;
 
 		// Notify viewports of resize
-		viewport_->width = width;
-		viewport_->height = height;
-
-		App3DFramework& app = Context::Instance().AppInstance();
-		app.OnResize(width, height);
+		viewport_->Width(width);
+		viewport_->Height(height);
 	}
 
 	// 改变窗口位置
@@ -478,8 +540,10 @@ namespace KlayGE
 		}
 	}
 
-	void OGLRenderWindow::WindowMovedOrResized()
+	void OGLRenderWindow::WindowMovedOrResized(Window const& win)
 	{
+		float const dpi_scale = win.DPIScale();
+
 #if defined KLAYGE_PLATFORM_WINDOWS
 		::RECT rect;
 		::GetClientRect(hWnd_, &rect);
@@ -498,14 +562,15 @@ namespace KlayGE
 		uint32_t new_width = DisplayWidth(x_display_, screen);
 		uint32_t new_height = DisplayHeight(x_display_, screen);
 #elif defined KLAYGE_PLATFORM_DARWIN
-		uint2 screen = Context::Instance().AppInstance().MainWnd()->GetNSViewSize();
+		uint2 screen = win.GetNSViewSize();
 		uint32_t new_width = screen[0];
 		uint32_t new_height = screen[1];
 #endif
 
 		if ((new_width != width_) || (new_height != height_))
 		{
-			Context::Instance().RenderFactoryInstance().RenderEngineInstance().Resize(new_width, new_height);
+			Context::Instance().RenderFactoryInstance().RenderEngineInstance().Resize(
+				static_cast<uint32_t>(new_width / dpi_scale + 0.5f), static_cast<uint32_t>(new_height / dpi_scale + 0.5f));
 		}
 	}
 
@@ -516,7 +581,7 @@ namespace KlayGE
 		{
 			if (hDC_ != nullptr)
 			{
-				OGLRenderEngine& re = *checked_cast<OGLRenderEngine*>(&Context::Instance().RenderFactoryInstance().RenderEngineInstance());
+				auto& re = checked_cast<OGLRenderEngine&>(Context::Instance().RenderFactoryInstance().RenderEngineInstance());
 
 				re.wglMakeCurrent(hDC_, nullptr);
 				if (hRC_ != nullptr)
@@ -556,18 +621,18 @@ namespace KlayGE
 #endif
 	}
 
-	void OGLRenderWindow::OnExitSizeMove(Window const & /*win*/)
+	void OGLRenderWindow::OnExitSizeMove(Window const& win)
 	{
-		this->WindowMovedOrResized();
+		this->WindowMovedOrResized(win);
 	}
 
-	void OGLRenderWindow::OnSize(Window const & win, bool active)
+	void OGLRenderWindow::OnSize(Window const& win, bool active)
 	{
 		if (active)
 		{
 			if (win.Ready())
 			{
-				this->WindowMovedOrResized();
+				this->WindowMovedOrResized(win);
 			}
 		}
 	}

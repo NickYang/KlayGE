@@ -18,18 +18,17 @@
 #include <KlayGE/PreDeclare.hpp>
 
 #include <string>
-#include <boost/noncopyable.hpp>
+
+#include <KlayGE/Show.hpp>
 
 namespace KlayGE
 {
-	class KLAYGE_CORE_API ShowFactory
+	class KLAYGE_CORE_API ShowFactory : boost::noncopyable
 	{
 	public:
 		virtual ~ShowFactory()
 		{
 		}
-
-		static ShowFactoryPtr NullObject();
 
 		virtual std::wstring const & Name() const = 0;
 		ShowEngine& ShowEngineInstance();
@@ -38,40 +37,12 @@ namespace KlayGE
 		void Resume();
 
 	private:
-		virtual ShowEnginePtr MakeShowEngine() = 0;
+		virtual std::unique_ptr<ShowEngine> MakeShowEngine() = 0;
 		virtual void DoSuspend() = 0;
 		virtual void DoResume() = 0;
 
 	protected:
-		ShowEnginePtr se_;
-	};
-
-	template <typename ShowEngineType>
-	class ConcreteShowFactory : boost::noncopyable, public ShowFactory
-	{
-	public:
-		ConcreteShowFactory(std::wstring const & name)
-				: name_(name)
-			{ }
-
-		std::wstring const & Name() const
-			{ return name_; }
-
-	private:
-		ShowEnginePtr MakeShowEngine()
-		{
-			return MakeSharedPtr<ShowEngineType>();
-		}
-
-		virtual void DoSuspend() KLAYGE_OVERRIDE
-		{
-		}
-		virtual void DoResume() KLAYGE_OVERRIDE
-		{
-		}
-
-	private:
-		std::wstring const name_;
+		std::unique_ptr<ShowEngine> se_;
 	};
 }
 

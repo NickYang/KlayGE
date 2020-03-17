@@ -19,31 +19,35 @@ int const LOG_2_TILE_SIZE = 4;
 int const TILE_SIZE = 1 << LOG_2_TILE_SIZE;
 
 TilingPostProcess::TilingPostProcess()
-	: PostProcess(L"Tiling",
-		std::vector<std::string>(),
-		std::vector<std::string>(1, "src_tex"),
-		std::vector<std::string>(1, "output"),
-		SyncLoadRenderEffect("TilingPP.fxml")->TechniqueByName("Tiling"))
+	: PostProcess(L"Tiling", false,
+		MakeSpan<std::string>(),
+		MakeSpan<std::string>({"src_tex"}),
+		MakeSpan<std::string>({"output"}),
+		RenderEffectPtr(), nullptr)
 {
-	downsampler_ = SyncLoadPostProcess("Copy.ppml", "bilinear_copy");
+	auto effect = SyncLoadRenderEffect("TilingPP.fxml");
+	this->Technique(effect, effect->TechniqueByName("Tiling"));
 
-	tile_per_row_line_ep_ = technique_->Effect().ParameterByName("tile_per_row_line");
+	downsampler_ = SyncLoadPostProcess("Copy.ppml", "BilinearCopy");
+
+	tile_per_row_line_ep_ = effect->ParameterByName("tile_per_row_line");
 }
 
-void TilingPostProcess::InputPin(uint32_t index, TexturePtr const & tex)
+void TilingPostProcess::InputPin(uint32_t index, ShaderResourceViewPtr const& srv)
 {
 	RenderFactory& rf = Context::Instance().RenderFactoryInstance();
 
+	auto const* tex = srv->TextureResource().get();
 	downsample_tex_ = rf.MakeTexture2D(tex->Width(0) / 2, tex->Height(0) / 2,
-		4, 1, tex->Format(), 1, 0, EAH_GPU_Read | EAH_GPU_Write | EAH_Generate_Mips, nullptr);
+		4, 1, tex->Format(), 1, 0, EAH_GPU_Read | EAH_GPU_Write | EAH_Generate_Mips);
 
-	downsampler_->InputPin(index, tex);
-	downsampler_->OutputPin(index, downsample_tex_);
+	downsampler_->InputPin(index, srv);
+	downsampler_->OutputPin(index, rf.Make2DRtv(downsample_tex_, 0, 1, 0));
 
-	PostProcess::InputPin(index, downsample_tex_);
+	PostProcess::InputPin(index, rf.MakeTextureSrv(downsample_tex_));
 }
 
-TexturePtr const & TilingPostProcess::InputPin(uint32_t index) const
+ShaderResourceViewPtr const& TilingPostProcess::InputPin(uint32_t index) const
 {
 	return downsampler_->InputPin(index);
 }

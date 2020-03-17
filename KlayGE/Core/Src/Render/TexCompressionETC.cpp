@@ -33,19 +33,18 @@
 #include <KlayGE/RenderFactory.hpp>
 #include <KFL/Color.hpp>
 #include <KlayGE/Texture.hpp>
-#include <KFL/Thread.hpp>
 
-#include <vector>
 #include <cstring>
+#include <iterator>
+#include <vector>
 #include <boost/assert.hpp>
 
 #include <KlayGE/TexCompressionETC.hpp>
+#include "../Base/TableGen/Tables.hpp"
 
 namespace
 {
 	using namespace KlayGE;
-
-	std::mutex singleton_mutex;
 
 	static uint8_t const selector_index_to_etc1[] = { 3, 2, 0, 1 };
 
@@ -345,7 +344,7 @@ namespace
 
 		uint32_t hist[256 * 4];
 
-		memset(hist, 0, sizeof(hist[0]) * 256 * key_size);
+		memset(hist, 0, sizeof(hist));
 
 #define IRS_GET_KEY(p) (*reinterpret_cast<uint32_t const *>(reinterpret_cast<uint8_t const *>(keys + *(p)) + key_ofs))
 #define IRS_GET_KEY_FROM_INDEX(i) (*reinterpret_cast<uint32_t const *>(reinterpret_cast<uint8_t const *>(keys + (i)) + key_ofs))
@@ -506,11 +505,7 @@ namespace
 
 namespace KlayGE
 {
-	uint8_t TexCompressionETC1::quant_5_tab_[256 + 16];
-	// Given an ETC1 diff/modifier_table/selector, and an 8-bit desired color, this table encodes the best packed_color in the low byte, and the abs error in the high byte.
-	uint16_t TexCompressionETC1::etc1_inverse_lookup_[2 * 8 * 4][256];      // [diff/modifier_table/selector][desired_color]
-	bool TexCompressionETC1::lut_inited_ = false;
-
+	using namespace TexCompressionLUT;
 
 	TexCompressionETC1::Params::Params()
 		: quality_(TCM_Quality),
@@ -644,67 +639,10 @@ namespace KlayGE
 		valid_ = false;
 	}
 
-	
+
 	TexCompressionETC1::TexCompressionETC1()
 	{
-		block_width_ = block_height_ = 4;
-		block_depth_ = 1;
-		block_bytes_ = NumFormatBytes(EF_ETC1) * 4;
-		decoded_fmt_ = EF_ARGB8;
-
-		if (!lut_inited_)
-		{
-			std::lock_guard<std::mutex> lock(singleton_mutex);
-			if (!lut_inited_)
-			{
-				for (uint32_t diff = 0; diff < 2; ++ diff)
-				{
-					uint32_t const limit = diff ? 32 : 16;
-
-					for (uint32_t inten = 0; inten < 8; ++ inten)
-					{
-						for (uint32_t selector = 0; selector < 4; ++ selector)
-						{
-							uint32_t const inverse_table_index = diff + (inten << 1) + (selector << 4);
-							for (uint32_t color = 0; color < 256; ++ color)
-							{
-								uint32_t best_err = std::numeric_limits<uint32_t>::max();
-								uint32_t best_packed_c = 0;
-								for (uint32_t packed_c = 0; packed_c < limit; ++ packed_c)
-								{
-									int v = ETC1DecodeValue(diff, inten, selector, packed_c);
-									uint32_t err = MathLib::abs(v - static_cast<int>(color));
-									if (err < best_err)
-									{
-										best_err = err;
-										best_packed_c = packed_c;
-										if (!best_err)
-										{
-											break;
-										}
-									}
-								}
-								BOOST_ASSERT(best_err <= 255);
-								etc1_inverse_lookup_[inverse_table_index][color]
-									= static_cast<uint16_t>(best_packed_c | (best_err << 8));
-							}
-						}
-					}
-				}
-
-				uint32_t expand5[32];
-				for (int i = 0; i < 32; ++ i)
-				{
-					expand5[i] = Extend5To8Bits(i);
-				}
-
-				for (int i = 0; i < 256 + 16; ++ i)
-				{
-					int v = MathLib::clamp(i - 8, 0, 255);
-					quant_5_tab_[i] = static_cast<uint8_t>(expand5[Mul8Bit(v, 31)]);
-				}
-			}
-		}
+		compression_format_ = EF_ETC1;
 
 		params_ = nullptr;
 		result_ = nullptr;
@@ -809,19 +747,19 @@ namespace KlayGE
 					if (TCM_Quality == params.quality_)
 					{
 						static int const scan_delta_0_to_4[] = { -4, -3, -2, -1, 0, 1, 2, 3, 4 };
-						params.scan_delta_size_ = sizeof(scan_delta_0_to_4) / sizeof(scan_delta_0_to_4[0]);
+						params.scan_delta_size_ = static_cast<uint32_t>(std::size(scan_delta_0_to_4));
 						params.scan_deltas_ = scan_delta_0_to_4;
 					}
 					else if (TCM_Balanced == params.quality_)
 					{
 						static int const scan_delta_0_to_1[] = { -1, 0, 1 };
-						params.scan_delta_size_ = sizeof(scan_delta_0_to_1) / sizeof(scan_delta_0_to_1[0]);
+						params.scan_delta_size_ = static_cast<uint32_t>(std::size(scan_delta_0_to_1));
 						params.scan_deltas_ = scan_delta_0_to_1;
 					}
 					else
 					{
 						static int const scan_delta_0[] = { 0 };
-						params.scan_delta_size_ = sizeof(scan_delta_0) / sizeof(scan_delta_0[0]);
+						params.scan_delta_size_ = static_cast<uint32_t>(std::size(scan_delta_0));
 						params.scan_deltas_ = scan_delta_0;
 					}
 
@@ -841,7 +779,7 @@ namespace KlayGE
 							if (TCM_Balanced == params.quality_)
 							{
 								static int const scan_delta_2_to_3[] = { -3, -2, 2, 3 };
-								params.scan_delta_size_ = sizeof(scan_delta_2_to_3) / sizeof(scan_delta_2_to_3[0]);
+								params.scan_delta_size_ = static_cast<uint32_t>(std::size(scan_delta_2_to_3));
 								params.scan_deltas_ = scan_delta_2_to_3;
 							}
 							else
@@ -850,12 +788,12 @@ namespace KlayGE
 								static int const scan_delta_5_to_8[] = { -8, -7, -6, -5, 5, 6, 7, 8 };
 								if (results[subblock].error_ > refinement_error_thresh1)
 								{
-									params.scan_delta_size_ = sizeof(scan_delta_5_to_8) / sizeof(scan_delta_5_to_8[0]);
+									params.scan_delta_size_ = static_cast<uint32_t>(std::size(scan_delta_5_to_8));
 									params.scan_deltas_ = scan_delta_5_to_8;
 								}
 								else
 								{
-									params.scan_delta_size_ = sizeof(scan_delta_5_to_5) / sizeof(scan_delta_5_to_5[0]);
+									params.scan_delta_size_ = static_cast<uint32_t>(std::size(scan_delta_5_to_5));
 									params.scan_deltas_ = scan_delta_5_to_5;
 								}
 							}
@@ -1166,8 +1104,6 @@ namespace KlayGE
 	// For random 888 inputs, MSE results are better than Erricson's ETC1 packer in "slow" mode ~9.5% of the time, is slightly worse only ~.01% of the time, and is equal the rest of the time.
 	uint64_t TexCompressionETC1::PackETC1UniformBlock(ETC1Block& block, ARGBColor32 const * argb) const
 	{
-		BOOST_ASSERT(etc1_inverse_lookup_[0][255]);
-
 		static uint32_t const next_comp[] = { 1, 2, 0, 1 };
 
 		uint8_t const * color = reinterpret_cast<uint8_t const *>(argb);
@@ -1216,7 +1152,10 @@ namespace KlayGE
 					}
 #endif
 
-					uint16_t const * inverse_table = etc1_inverse_lookup_[x & 0xFF];
+					uint32_t const row = x & 0xFF;
+					BOOST_ASSERT(row < 64);
+					KLAYGE_ASSUME(row < 64);
+					uint16_t const * inverse_table = ETC1_INVERSE_LOOKUP[row];
 					uint16_t p1 = inverse_table[c1];
 					uint16_t p2 = inverse_table[c2];
 					uint32_t const trial_err = MathLib::sqr(c_plus_delta - color[i])
@@ -1267,8 +1206,6 @@ namespace KlayGE
 	uint32_t TexCompressionETC1::PackETC1UniformPartition(Results& results, uint32_t num_colors, ARGBColor32 const * argb,
 			bool use_diff, ARGBColor32 const * base_color5_unscaled) const
 	{
-		BOOST_ASSERT(etc1_inverse_lookup_[0][255]);
-
 		static uint32_t const next_comp[] = { 1, 2, 0, 1 };
 
 		uint8_t const * color = reinterpret_cast<uint8_t const *>(argb);
@@ -1339,8 +1276,10 @@ namespace KlayGE
 					}
 #endif
 
-					BOOST_ASSERT((x & 0xFF) < 64);
-					uint16_t const * inverse_table = etc1_inverse_lookup_[x & 0xFF];
+					uint32_t const row = x & 0xFF;
+					BOOST_ASSERT(row < 64);
+					KLAYGE_ASSUME(row < 64);
+					uint16_t const * inverse_table = ETC1_INVERSE_LOOKUP[row];
 					uint16_t p1 = inverse_table[c1];
 					uint16_t p2 = inverse_table[c2];
 
@@ -1878,10 +1817,7 @@ namespace KlayGE
 
 	TexCompressionETC2RGB8::TexCompressionETC2RGB8()
 	{
-		block_width_ = block_height_ = 4;
-		block_depth_ = 1;
-		block_bytes_ = NumFormatBytes(EF_ETC2_BGR8) * 4;
-		decoded_fmt_ = EF_ARGB8;
+		compression_format_ = EF_ETC2_BGR8;
 
 		etc1_codec_ = MakeSharedPtr<TexCompressionETC1>();
 	}
@@ -2101,10 +2037,7 @@ namespace KlayGE
 
 	TexCompressionETC2RGB8A1::TexCompressionETC2RGB8A1()
 	{
-		block_width_ = block_height_ = 4;
-		block_depth_ = 1;
-		block_bytes_ = NumFormatBytes(EF_ETC2_A1BGR8) * 4;
-		decoded_fmt_ = EF_ARGB8;
+		compression_format_ = EF_ETC2_A1BGR8;
 
 		etc1_codec_ = MakeSharedPtr<TexCompressionETC1>();
 		etc2_rgb8_codec_ = MakeSharedPtr<TexCompressionETC2RGB8>();

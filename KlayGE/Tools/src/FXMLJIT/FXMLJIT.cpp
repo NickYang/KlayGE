@@ -32,191 +32,35 @@
 #include <KlayGE/Context.hpp>
 #include <KlayGE/ResLoader.hpp>
 #include <KFL/XMLDom.hpp>
+#include <KFL/CXX17/filesystem.hpp>
+#include <KlayGE/App3D.hpp>
+#include <KlayGE/RenderFactory.hpp>
+#include <KlayGE/RenderEngine.hpp>
+#include <KlayGE/RenderEffect.hpp>
 
 #include <iostream>
 
 #include <boost/algorithm/string/case_conv.hpp>
+#include <boost/algorithm/string/split.hpp>
+#include <boost/algorithm/string/classification.hpp>
 
-#if defined(KLAYGE_TS_LIBRARY_FILESYSTEM_V3_SUPPORT)
-	#include <experimental/filesystem>
-#elif defined(KLAYGE_TS_LIBRARY_FILESYSTEM_V2_SUPPORT)
-	#include <filesystem>
-	namespace std
-	{
-		namespace experimental
-		{
-			namespace filesystem = std::tr2::sys;
-		}
-	}
-#else
-	#if defined(KLAYGE_COMPILER_GCC)
-		#pragma GCC diagnostic push
-		#pragma GCC diagnostic ignored "-Wdeprecated-declarations" // Ignore auto_ptr declaration
-	#endif
-	#include <boost/filesystem.hpp>
-	#if defined(KLAYGE_COMPILER_GCC)
-		#pragma GCC diagnostic pop
-	#endif
-	namespace std
-	{
-		namespace experimental
-		{
-			namespace filesystem = boost::filesystem;
-		}
-	}
-#endif
-
-#include "OfflineRenderEffect.hpp"
+#include <KlayGE/ToolCommon.hpp>
+#include <KlayGE/DevHelper/PlatformDefinition.hpp>
 
 using namespace std;
 using namespace KlayGE;
 
-uint32_t const KFX_VERSION = 0x0107;
-
-int RetrieveAttrValue(XMLNodePtr node, std::string const & attr_name, int default_value)
-{
-	XMLAttributePtr attr = node->Attrib(attr_name);
-	if (attr)
-	{
-		return attr->ValueInt();
-	}
-
-	return default_value;
-}
-
-std::string RetrieveAttrValue(XMLNodePtr node, std::string const & attr_name, std::string const & default_value)
-{
-	XMLAttributePtr attr = node->Attrib(attr_name);
-	if (attr)
-	{
-		return attr->ValueString();
-	}
-
-	return default_value;
-}
-
-int RetrieveNodeValue(XMLNodePtr root, std::string const & node_name, int default_value)
-{
-	XMLNodePtr node = root->FirstNode(node_name);
-	if (node)
-	{
-		return RetrieveAttrValue(node, "value", default_value);
-	}
-
-	return default_value;
-}
-
-std::string RetrieveNodeValue(XMLNodePtr root, std::string const & node_name, std::string const & default_value)
-{
-	XMLNodePtr node = root->FirstNode(node_name);
-	if (node)
-	{
-		return RetrieveAttrValue(node, "value", default_value);
-	}
-
-	return default_value;
-}
-
-Offline::OfflineRenderDeviceCaps LoadPlatformConfig(std::string const & platform)
-{
-	ResIdentifierPtr plat = ResLoader::Instance().Open("PlatConf/" + platform + ".plat");
-
-	KlayGE::XMLDocument doc;
-	XMLNodePtr root = doc.Parse(plat);
-
-	Offline::OfflineRenderDeviceCaps caps;
-
-	caps.platform = RetrieveAttrValue(root, "name", "");
-	caps.major_version = static_cast<uint8_t>(RetrieveAttrValue(root, "major_version", 0));
-	caps.minor_version = static_cast<uint8_t>(RetrieveAttrValue(root, "minor_version", 0));
-
-	caps.requires_flipping = RetrieveNodeValue(root, "requires_flipping", 0) ? true : false;
-	std::string const fourcc_str = RetrieveNodeValue(root, "native_shader_fourcc", "");
-	caps.native_shader_fourcc = (fourcc_str[0] << 0) + (fourcc_str[1] << 8) + (fourcc_str[2] << 16) + (fourcc_str[3] << 24);
-	caps.native_shader_version = RetrieveNodeValue(root, "native_shader_version", 0);
-
-	XMLNodePtr max_shader_model_node = root->FirstNode("max_shader_model");
-	caps.max_shader_model = ShaderModel(static_cast<uint8_t>(RetrieveAttrValue(max_shader_model_node, "major", 0)),
-		static_cast<uint8_t>(RetrieveAttrValue(max_shader_model_node, "minor", 0)));
-
-	caps.max_texture_depth = RetrieveNodeValue(root, "max_texture_depth", 0);
-	caps.max_texture_array_length = RetrieveNodeValue(root, "max_texture_array_length", 0);
-	caps.max_pixel_texture_units = static_cast<uint8_t>(RetrieveNodeValue(root, "max_pixel_texture_units", 0));
-	caps.max_simultaneous_rts = static_cast<uint8_t>(RetrieveNodeValue(root, "max_simultaneous_rts", 0));
-
-	caps.standard_derivatives_support = RetrieveNodeValue(root, "standard_derivatives_support", 0) ? true : false;
-	caps.shader_texture_lod_support = RetrieveNodeValue(root, "shader_texture_lod_support", 0) ? true : false;
-	caps.fp_color_support = RetrieveNodeValue(root, "fp_color_support", 0) ? true : false;
-	caps.pack_to_rgba_required = RetrieveNodeValue(root, "pack_to_rgba_required", 0) ? true : false;
-
-	caps.gs_support = RetrieveNodeValue(root, "gs_support", 0) ? true : false;
-	caps.cs_support = RetrieveNodeValue(root, "cs_support", 0) ? true : false;
-	caps.hs_support = RetrieveNodeValue(root, "hs_support", 0) ? true : false;
-	caps.ds_support = RetrieveNodeValue(root, "ds_support", 0) ? true : false;
-
-	caps.bc4_support = RetrieveNodeValue(root, "bc4_support", 0) ? true : false;
-	caps.bc5_support = RetrieveNodeValue(root, "bc5_support", 0) ? true : false;
-	caps.frag_depth_support = RetrieveNodeValue(root, "frag_depth_support", 0) ? true : false;
-	caps.ubo_support = RetrieveNodeValue(root, "ubo_support", 0) ? true : false;
-
-	return caps;
-}
+uint32_t const KFX_VERSION = 0x0150;
 
 int main(int argc, char* argv[])
 {
-	using namespace std::experimental;
-
 	if (argc < 2)
 	{
-		cout << "Usage: FXMLJIT pc_dx11|pc_dx10|pc_dx9|win_tegra3|pc_gl4|pc_gl3|pc_gl2|android_tegra3|ios xxx.fxml [target folder]" << endl;
+		cout << "Usage: FXMLJIT d3d_12_1|d3d_12_0|d3d_11_1|d3d_11_0|gl_4_6|gl_4_5|gl_4_4|gl_4_3|gl_4_2|gl_4_1|gles_3_2|gles_3_1|gles_3_0 xxx.fxml [target folder]" << endl;
 		return 1;
 	}
 
-	ResLoader::Instance().AddPath("../../Tools/media/PlatformDeployer");
-
 	std::string platform = argv[1];
-
-	if (("pc_dx11" == platform) || ("pc_dx10" == platform) || ("pc_dx9" == platform) || ("win_tegra3" == platform)
-		|| ("pc_gl4" == platform) || ("pc_gl3" == platform) || ("pc_gl2" == platform)
-		|| ("android_tegra3" == platform) || ("ios" == platform))
-	{
-		if ("pc_dx11" == platform)
-		{
-			platform = "d3d_11_0";
-		}
-		else if ("pc_dx10" == platform)
-		{
-			platform = "d3d_10_0";
-		}
-		else if ("pc_dx9" == platform)
-		{
-			platform = "d3d_9_3";
-		}
-		else if ("win_tegra3" == platform)
-		{
-			platform = "d3d_9_1";
-		}
-		else if ("pc_gl4" == platform)
-		{
-			platform = "gl_4_0";
-		}
-		else if ("pc_gl3" == platform)
-		{
-			platform = "gl_3_0";
-		}
-		else if ("pc_gl2" == platform)
-		{
-			platform = "gl_2_0";
-		}
-		else if ("android_tegra3" == platform)
-		{
-			platform = "gles_2_0";
-		}
-		else if ("ios" == platform)
-		{
-			platform = "gles_2_0";
-		}
-	}
 
 	boost::algorithm::to_lower(platform);
 
@@ -226,22 +70,41 @@ int main(int argc, char* argv[])
 		target_folder = argv[3];
 	}
 
-	Offline::OfflineRenderDeviceCaps caps = LoadPlatformConfig(platform);
+	Context::Instance().LoadCfg("KlayGE.cfg");
+	ContextCfg context_cfg = Context::Instance().Config();
+	context_cfg.render_factory_name = "NullRender";
+	context_cfg.graphics_cfg.hide_win = true;
+	context_cfg.graphics_cfg.hdr = false;
+	context_cfg.graphics_cfg.ppaa = false;
+	context_cfg.graphics_cfg.gamma = false;
+	context_cfg.graphics_cfg.color_grading = false;
+	Context::Instance().Config(context_cfg);
+
+	PlatformDefinition platform_def(platform + ".plat");
+
+	RenderEngine& re = Context::Instance().RenderFactoryInstance().RenderEngineInstance();
+	int major_version = platform_def.major_version;
+	int minor_version = platform_def.minor_version;
+	bool frag_depth_support = platform_def.frag_depth_support;
+	re.SetCustomAttrib("PLATFORM", &platform_def.platform);
+	re.SetCustomAttrib("MAJOR_VERSION", &major_version);
+	re.SetCustomAttrib("MINOR_VERSION", &minor_version);
+	re.SetCustomAttrib("NATIVE_SHADER_FOURCC", &platform_def.native_shader_fourcc);
+	re.SetCustomAttrib("NATIVE_SHADER_VERSION", &platform_def.native_shader_version);
+	re.SetCustomAttrib("REQUIRES_FLIPPING", &platform_def.requires_flipping);
+	re.SetCustomAttrib("DEVICE_CAPS", &platform_def.device_caps);
+	re.SetCustomAttrib("FRAG_DEPTH_SUPPORT", &frag_depth_support);
 
 	std::string fxml_name(argv[2]);
 	filesystem::path fxml_path(fxml_name);
-#ifdef KLAYGE_TS_LIBRARY_FILESYSTEM_V2_SUPPORT
-	std::string const base_name = fxml_path.stem();
-#else
 	std::string const base_name = fxml_path.stem().string();
-#endif
 	filesystem::path fxml_directory = fxml_path.parent_path();
 	ResLoader::Instance().AddPath(fxml_directory.string());
 
 	filesystem::path kfx_name(base_name + ".kfx");
 	filesystem::path kfx_path = fxml_directory / kfx_name;
 	bool skip_jit = false;
-	if (filesystem::exists(kfx_path))
+	if (filesystem::exists(fxml_path) && filesystem::exists(kfx_path))
 	{
 		ResIdentifierPtr source = ResLoader::Instance().Open(fxml_name);
 		ResIdentifierPtr kfx_source = ResLoader::Instance().Open(kfx_path.string());
@@ -266,7 +129,13 @@ int main(int argc, char* argv[])
 			kfx_source->read(&shader_ver, sizeof(shader_ver));
 			shader_ver = LE2Native(shader_ver);
 
-			if ((caps.native_shader_fourcc == shader_fourcc) && (caps.native_shader_version == shader_ver))
+			uint8_t shader_platform_name_len;
+			kfx_source->read(&shader_platform_name_len, sizeof(shader_platform_name_len));
+			std::string shader_platform_name(shader_platform_name_len, 0);
+			kfx_source->read(&shader_platform_name[0], shader_platform_name_len);
+
+			if ((re.NativeShaderFourCC() == shader_fourcc) && (re.NativeShaderVersion() == shader_ver)
+				&& (re.NativeShaderPlatformName() == shader_platform_name))
 			{
 				uint64_t timestamp;
 				kfx_source->read(&timestamp, sizeof(timestamp));
@@ -281,13 +150,29 @@ int main(int argc, char* argv[])
 
 	if (!skip_jit)
 	{
-		Offline::RenderEffect effect(caps);
-		effect.Load(fxml_name);
+		std::vector<string> fxml_names;
+		if (ResLoader::Instance().Locate(fxml_name).empty())
+		{
+			std::vector<std::string> frags;
+			boost::algorithm::split(frags, base_name, boost::is_any_of("+"));
+			for (auto const & frag : frags)
+			{
+				fxml_names.push_back(ResLoader::Instance().Locate(frag + ".fxml"));
+			}
+		}
+		else
+		{
+			fxml_names.push_back(fxml_name);
+		}
+
+		RenderEffect effect;
+		effect.Load(fxml_names);
+		effect.CompileShaders();
 	}
 	if (!target_folder.empty())
 	{
 		filesystem::copy_file(kfx_path, target_folder / kfx_name,
-#ifdef KLAYGE_TS_LIBRARY_FILESYSTEM_V3_SUPPORT
+#if defined(KLAYGE_CXX17_LIBRARY_FILESYSTEM_SUPPORT) || defined(KLAYGE_TS_LIBRARY_FILESYSTEM_SUPPORT)
 			filesystem::copy_options::overwrite_existing);
 #else
 			filesystem::copy_option::overwrite_if_exists);

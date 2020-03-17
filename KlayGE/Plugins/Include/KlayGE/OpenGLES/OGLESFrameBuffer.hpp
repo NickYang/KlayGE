@@ -28,10 +28,11 @@ namespace KlayGE
 
 		virtual std::wstring const & Description() const;
 
-		void OnBind();
+		void OnBind() override;
+		void OnUnbind() override;
 
 		void Clear(uint32_t flags, Color const & clr, float depth, int32_t stencil);
-		virtual void Discard(uint32_t flags) KLAYGE_OVERRIDE;
+		virtual void Discard(uint32_t flags) override;
 
 		GLuint OGLFbo() const
 		{
@@ -40,6 +41,8 @@ namespace KlayGE
 
 	protected:
 		GLuint fbo_;
+
+		std::vector<GLenum> gl_targets_;
 	};
 
 	typedef std::shared_ptr<OGLESFrameBuffer> OGLESFrameBufferPtr;

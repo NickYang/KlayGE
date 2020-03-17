@@ -37,8 +37,12 @@
 
 #include <DXBC2GLSL/GLSLGen.hpp>
 
+#include <KFL/CXX17.hpp>
+
+#include <iterator>
 #include <string>
 #include <ostream>
+#include <set>
 
 namespace
 {
@@ -56,12 +60,14 @@ namespace
 		"430",
 		"440",
 		"450",
+		"460",
 
 		"100",
 		"300 es",
 		"310 es",
 		"320 es"
 	};
+	KLAYGE_STATIC_ASSERT(GSV_NumVersions == std::size(GLSLVersionStr));
 
 
 	uint32_t bitcount32(uint32_t x)
@@ -190,6 +196,10 @@ uint32_t GLSLGen::DefaultRules(GLSLVersion version)
 		}
 		if (version >= GSV_450)
 		{
+			rules |= GSR_ExplicitMultiSample;
+		}
+		if (version >= GSV_460)
+		{
 		}
 	}
 	else
@@ -229,12 +239,13 @@ uint32_t GLSLGen::DefaultRules(GLSLVersion version)
 }
 
 void GLSLGen::FeedDXBC(std::shared_ptr<ShaderProgram> const & program,
-		bool has_gs, ShaderTessellatorPartitioning ds_partitioning, ShaderTessellatorOutputPrimitive ds_output_primitive,
+		bool has_gs, bool has_ps, ShaderTessellatorPartitioning ds_partitioning, ShaderTessellatorOutputPrimitive ds_output_primitive,
 		GLSLVersion version, uint32_t glsl_rules)
 {
 	program_ = program;
 	shader_type_ = program_->version.type;
 	has_gs_ = has_gs;
+	has_ps_ = has_ps;
 	ds_partitioning_ = ds_partitioning;
 	ds_output_primitive_ = ds_output_primitive;
 	glsl_version_ = version;
@@ -291,6 +302,11 @@ void GLSLGen::ToGLSL(std::ostream& out)
 	{
 		out << "#extension GL_EXT_tessellation_shader : enable\n";
 	}
+	if ((ST_VS == shader_type_) && (glsl_rules_ & GSR_EXTVertexShaderLayer))
+	{
+		out << "#extension GL_NV_viewport_array2 : enable\n";
+		out << "#extension GL_AMD_vertex_shader_layer : enable\n";
+	}
 	out << "\n";
 
 	if (glsl_rules_ & GSR_Precision)
@@ -317,6 +333,8 @@ void GLSLGen::ToGLSL(std::ostream& out)
 		out << "#define gl_FragDepth gl_FragDepthEXT\n";
 		out << "#endif\n";
 	}
+
+	this->ToStructs(out);
 
 	if ((ST_GS == shader_type_) && (glsl_rules_ & GSR_CoreGS))
 	{
@@ -377,7 +395,7 @@ void GLSLGen::ToGLSL(std::ostream& out)
 
 	if (ST_HS == shader_type_)
 	{
-		out << "layout(vertices = " << program_->hs_output_control_point_count <<") out;\n\n";
+		out << "layout(vertices = " << program_->hs_output_control_point_count << ") out;\n\n";
 	}
 
 	if (ST_DS == shader_type_)
@@ -490,6 +508,111 @@ void GLSLGen::ToGLSL(std::ostream& out)
 		this->ToHSJoinPhases(out);
 	}
 	out << "}" << "\n";
+}
+
+void GLSLGen::ToStructs(std::ostream& out)
+{
+	std::set<std::string> struct_names;
+	for (auto const& cb : program_->cbuffers)
+	{
+		for (auto const& var : cb.vars)
+		{
+			if (var.type_desc.var_class == SVC_STRUCT)
+			{
+				if (struct_names.find(var.type_desc.name) == struct_names.end())
+				{
+					struct_names.insert(var.type_desc.name);
+
+					out << "struct " << var.type_desc.name << "\n";
+					out << "{\n";
+					for (auto const& member : var.type_desc.member_desc)
+					{
+						this->ToType(out, member.type);
+						out << ' ' << member.name << ";\n";
+					}
+					out << "};\n\n";
+				}
+			}
+		}
+	}
+}
+
+void GLSLGen::ToType(std::ostream& out, DXBCShaderTypeDesc const& type_desc) const
+{
+	switch (type_desc.var_class)
+	{
+	case SVC_SCALAR:
+		out << type_desc.name;
+		break;
+
+	case SVC_VECTOR:
+		if (1 == type_desc.columns)
+		{
+			out << type_desc.name;
+		}
+		else
+		{
+			switch (type_desc.type)
+			{
+			case SVT_INT:
+				out << "i";
+				break;
+
+			case SVT_FLOAT:
+				break;
+
+			case SVT_UINT:
+				if (glsl_rules_ & GSR_UIntType)
+				{
+					out << "u";
+				}
+				else
+				{
+					out << "i";
+				}
+				break;
+
+			default:
+				BOOST_ASSERT_MSG(false, "unexpected vector type");
+				break;
+			}
+			out << "vec";
+		}
+		out << type_desc.columns;
+		break;
+
+	case SVC_MATRIX_COLUMNS:
+		if (glsl_rules_ & GSR_MatrixType)
+		{
+			// In glsl mat3x2 means 3 columns 2 rows, which is opposite to hlsl
+			out << "mat" << type_desc.columns << 'x' << type_desc.rows;
+		}
+		else
+		{
+			out << "vec" << type_desc.columns;
+		}
+		break;
+
+	case SVC_MATRIX_ROWS:
+		if (glsl_rules_ & GSR_MatrixType)
+		{
+			// In glsl mat3x2 means 3 columns 2 rows, which is opposite to hlsl
+			out << "mat" << type_desc.columns << 'x' << type_desc.rows;
+		}
+		else
+		{
+			out << "vec" << type_desc.rows;
+		}
+		break;
+
+	case SVC_STRUCT:
+		out << type_desc.name;
+		break;
+
+	default:
+		BOOST_ASSERT_MSG(false, "Unhandled type");
+		break;
+	}
 }
 
 void GLSLGen::ToDeclarations(std::ostream& out)
@@ -702,7 +825,9 @@ void GLSLGen::ToDclInterShaderOutputRecords(std::ostream& out)
 			if (output_var)
 			{
 				int num_comps = 4;
-				if (ST_PS == shader_type_)
+				if (((ST_VS == shader_type_) && !has_gs_ && !has_ps_) || ((ST_DS == shader_type_) && !has_gs_ && !has_ps_)
+					|| ((ST_GS == shader_type_) && !has_ps_)
+					|| (ST_PS == shader_type_))
 				{
 					num_comps = bitcount32(program_->params_out[i].mask);
 				}
@@ -769,7 +894,7 @@ void GLSLGen::ToDclInterShaderOutputRecords(std::ostream& out)
 				}
 				if (ST_HS == shader_type_)
 				{
-					out << "In[gl_MaxPatchVertices]";
+					out << "In[" << program_->hs_output_control_point_count << "]";
 				}
 				if (ST_DS == shader_type_ && has_gs_)
 				{
@@ -1020,8 +1145,15 @@ void GLSLGen::ToCopyToInterShaderInputRegisters(std::ostream& out) const
 						need_comps = true;
 						break;
 
+					// TODO: Processing SN_CLIP_DISTANCE and SN_CULL_DISTANCE
+
 					case SN_RENDER_TARGET_ARRAY_INDEX:
 						out << "gl_Layer";
+						need_comps = false;
+						break;
+
+					case SN_VIEWPORT_ARRAY_INDEX:
+						out << "gl_ViewportIndex";
 						need_comps = false;
 						break;
 
@@ -1030,18 +1162,34 @@ void GLSLGen::ToCopyToInterShaderInputRegisters(std::ostream& out) const
 						need_comps = false;
 						break;
 
-					case SN_INSTANCE_ID:
-						out << "gl_InstanceID";
-						need_comps = false;
-						break;
-
 					case SN_PRIMITIVE_ID:
 						out << "gl_PrimitiveID";
 						need_comps = false;
 						break;
 
-					case SN_VIEWPORT_ARRAY_INDEX:
-						out << "gl_ViewportIndex";
+					case SN_INSTANCE_ID:
+						out << "gl_InstanceID";
+						need_comps = false;
+						break;
+
+					case SN_IS_FRONT_FACE:
+						if (glsl_rules_ & GSR_UIntType)
+						{
+							out << "uint";
+						}
+						out << "(gl_FrontFacing ? 1 : 0)";
+						need_comps = false;
+						break;
+
+					case SN_SAMPLE_INDEX:
+						if (glsl_rules_ & GSR_ExplicitMultiSample)
+						{
+							out << "gl_SampleID";
+						}
+						else
+						{
+							out << "0";
+						}
 						need_comps = false;
 						break;
 
@@ -1371,75 +1519,23 @@ void GLSLGen::ToDeclaration(std::ostream& out, ShaderDecl const & dcl)
 							switch (var.type_desc.var_class)
 							{
 							case SVC_SCALAR:
-								out << uniform << var.type_desc.name;
-								out << " " << var.var_desc.name;
-								if (element_count)
-								{
-									out << "[" << element_count << "]";
-								}
-								break;
-
 							case SVC_VECTOR:
+							case SVC_STRUCT:
 								out << uniform;
-								if (1 == var.type_desc.columns)
-								{
-									out << var.type_desc.name;
-								}
-								else
-								{
-									switch (var.type_desc.type)
-									{
-									case SVT_INT:
-										out << "i";
-										break;
-
-									case SVT_FLOAT:
-										break;
-
-									case SVT_UINT:
-										if (glsl_rules_ & GSR_UIntType)
-										{
-											out << "u";
-										}
-										else
-										{
-											out << "i";
-										}
-										break;
-
-									default:
-										BOOST_ASSERT_MSG(false, "unexpected vector type");
-										break;
-									}
-									out << "vec";
-								}
-								out << var.type_desc.columns << " " << var.var_desc.name;
-								if (element_count)
-								{
-									out << "[" << element_count << "]";
-								}
+								this->ToType(out, var.type_desc);
 								break;
 
 							case SVC_MATRIX_COLUMNS:
 								if (glsl_rules_ & GSR_MatrixType)
 								{
-									// In glsl mat3x2 means 3 columns 2 rows, which is opposite to hlsl
-									out << uniform << "mat" << var.type_desc.columns << 'x'
-										<< var.type_desc.rows << " " << var.var_desc.name;
-									if (element_count)
-									{
-										out << "[" << element_count << "]";
-									}
+									out << uniform;
+									this->ToType(out, var.type_desc);
 								}
 								else
 								{
-									uint32_t array_size = var.type_desc.rows;
-									if (element_count)
-									{
-										array_size *= element_count;
-									}
-									out << uniform << "vec" << var.type_desc.columns << ' '
-										<< var.var_desc.name << "[" << array_size << "]";
+									element_count *= var.type_desc.rows;
+									out << uniform;
+									this->ToType(out, var.type_desc);
 								}
 								break;
 
@@ -1447,29 +1543,25 @@ void GLSLGen::ToDeclaration(std::ostream& out, ShaderDecl const & dcl)
 								if (glsl_rules_ & GSR_MatrixType)
 								{
 									// In glsl mat3x2 means 3 columns 2 rows, which is opposite to hlsl
-									out << "layout(row_major) "
-										<< uniform << "mat" << var.type_desc.columns << 'x'
-										<< var.type_desc.rows << " " << var.var_desc.name;
-									if (element_count)
-									{
-										out << "[" << element_count << "]";
-									}
+									out << "layout(row_major) " << uniform;
+									this->ToType(out, var.type_desc);
 								}
 								else
 								{
-									uint32_t array_size = var.type_desc.columns;
-									if (element_count)
-									{
-										array_size *= element_count;
-									}
-									out << uniform << "vec" << var.type_desc.rows << ' '
-										<< var.var_desc.name << "[" << array_size << "]";
+									element_count *= var.type_desc.columns;
+									out << uniform;
+									this->ToType(out, var.type_desc);
 								}
 								break;
 
 							default:
 								BOOST_ASSERT_MSG(false, "Unhandled type,when converting dcl_constant_buffer");
 								break;
+							}
+							out << ' ' << var.var_desc.name;
+							if (element_count != 0)
+							{
+								out << "[" << element_count << "]";
 							}
 							if (has_default_value)
 							{
@@ -1685,7 +1777,28 @@ void GLSLGen::ToDeclaration(std::ostream& out, ShaderDecl const & dcl)
 			switch (cbuffer.vars[0].type_desc.var_class)
 			{
 			case SVC_VECTOR:
-				out << cbuffer.vars[0].type_desc.name << cbuffer.vars[0].type_desc.columns;
+				{
+					std::string name;
+					switch (cbuffer.vars[0].type_desc.type)
+					{
+					case SVT_INT:
+						name = "ivec";
+						break;
+
+					case SVT_UINT:
+						name = "uvec";
+						break;
+
+					case SVT_FLOAT:
+						name = "vec";
+						break;
+
+					default:
+						name = cbuffer.vars[0].type_desc.name;
+						break;
+					}
+					out << name << cbuffer.vars[0].type_desc.columns;
+				}
 				break;
 
 			case SVC_SCALAR:
@@ -2079,11 +2192,11 @@ void GLSLGen::ToInstruction(std::ostream& out, ShaderInstruction const & insn) c
 		}
 		else
 		{
-			out << " = ivec4(ivec4(equal(vec4(";
+			out << " = (ivec4(equal(vec4(";
 			this->ToOperands(out, *insn.ops[1], oit);
 			out << "), vec4(";
 			this->ToOperands(out, *insn.ops[2], oit);
-			out << "))) * -1)";
+			out << "))) * ivec4(-1))";
 			this->ToComponentSelectors(out, *insn.ops[0]);
 			out << ";";
 		}
@@ -2106,11 +2219,11 @@ void GLSLGen::ToInstruction(std::ostream& out, ShaderInstruction const & insn) c
 		}
 		else
 		{
-			out << " = ivec4(ivec4(equal(ivec4(";
+			out << " = (ivec4(equal(ivec4(";
 			this->ToOperands(out, *insn.ops[1], oit);
 			out << "), ivec4(";
 			this->ToOperands(out, *insn.ops[2], oit);
-			out << "))) * -1)";
+			out << "))) * ivec4(-1))";
 			this->ToComponentSelectors(out, *insn.ops[0]);
 			out << ";";
 		}		
@@ -2128,11 +2241,11 @@ void GLSLGen::ToInstruction(std::ostream& out, ShaderInstruction const & insn) c
 		}
 		else
 		{
-			out << " = ivec4(ivec4(notEqual(vec4(";
+			out << " = (ivec4(notEqual(vec4(";
 			this->ToOperands(out, *insn.ops[1], oit);
-			out << "), ";
+			out << "), vec4(";
 			this->ToOperands(out, *insn.ops[2], oit);
-			out << "))) * -1)";
+			out << "))) * ivec4(-1))";
 			this->ToComponentSelectors(out, *insn.ops[0]);
 			out << ";";
 		}
@@ -2150,11 +2263,11 @@ void GLSLGen::ToInstruction(std::ostream& out, ShaderInstruction const & insn) c
 		}
 		else
 		{
-			out << " = ivec4(ivec4(notEqual(ivec4(";
+			out << " = (ivec4(notEqual(ivec4(";
 			this->ToOperands(out, *insn.ops[1], oit);
 			out << "), ivec4(";
 			this->ToOperands(out, *insn.ops[2], oit);
-			out << "))) * -1)";
+			out << "))) * ivec4(-1))";
 			this->ToComponentSelectors(out, *insn.ops[0]);
 			out << ";";
 		}
@@ -2172,11 +2285,11 @@ void GLSLGen::ToInstruction(std::ostream& out, ShaderInstruction const & insn) c
 		}
 		else
 		{
-			out << " = ivec4(ivec4(lessThan(vec4(";
+			out << " = (ivec4(lessThan(vec4(";
 			this->ToOperands(out, *insn.ops[1], oit);
 			out << "), vec4(";
 			this->ToOperands(out, *insn.ops[2], oit);
-			out << "))) * -1)";
+			out << "))) * ivec4(-1))";
 			this->ToComponentSelectors(out, *insn.ops[0]);
 			out << ";";
 		}
@@ -2194,11 +2307,11 @@ void GLSLGen::ToInstruction(std::ostream& out, ShaderInstruction const & insn) c
 		}
 		else
 		{
-			out << " = ivec4(ivec4(lessThan(ivec4(";
+			out << " = (ivec4(lessThan(ivec4(";
 			this->ToOperands(out, *insn.ops[1], oit);
 			out << "), ivec4(";
 			this->ToOperands(out, *insn.ops[2], oit);
-			out << "))) * -1)";
+			out << "))) * ivec4(-1))";
 			this->ToComponentSelectors(out, *insn.ops[0]);
 			out << ";";
 		}
@@ -2260,11 +2373,11 @@ void GLSLGen::ToInstruction(std::ostream& out, ShaderInstruction const & insn) c
 		}
 		else
 		{
-			out << " = ivec4(ivec4(greaterThanEqual(vec4(";
+			out << " = (ivec4(greaterThanEqual(vec4(";
 			this->ToOperands(out, *insn.ops[1], oit);
 			out << "), vec4(";
 			this->ToOperands(out, *insn.ops[2], oit);
-			out << "))) * -1)";
+			out << "))) * ivec4(-1))";
 			this->ToComponentSelectors(out, *insn.ops[0]);
 			out << ";";
 		}
@@ -2282,11 +2395,11 @@ void GLSLGen::ToInstruction(std::ostream& out, ShaderInstruction const & insn) c
 		}
 		else
 		{
-			out << " = ivec4(ivec4(greaterThanEqual(ivec4(";
+			out << " = (ivec4(greaterThanEqual(ivec4(";
 			this->ToOperands(out, *insn.ops[1], oit);
 			out << "), ivec4(";
 			this->ToOperands(out, *insn.ops[2], oit);
-			out << "))) * -1)";
+			out << "))) * ivec4(-1))";
 			this->ToComponentSelectors(out, *insn.ops[0]);
 			out << ";";
 		}
@@ -3780,7 +3893,6 @@ void GLSLGen::ToInstruction(std::ostream& out, ShaderInstruction const & insn) c
 		{
 			//ignore _uint suffix
 			//process _rcpFloat suffix
-			char const * c = (SRIRT_RCPFLOAT == insn.insn.resinfo_return_type) ? "1.0/" : "";
 			for (auto const & tex : textures_)
 			{
 				if (tex.tex_index == insn.ops[2]->indices[0].disp)
@@ -3794,18 +3906,24 @@ void GLSLGen::ToInstruction(std::ostream& out, ShaderInstruction const & insn) c
 					switch (insn.resource_target)
 					{
 					case SRD_TEXTURE1D:
+						//dest.x=float(textureSize(src0,src1).x);
+						this->ToOperands(out, *insn.ops[0], oot | (oot << 8), false);
+						this->ToSingleComponentSelector(out, *insn.ops[0], 0);
+						out << " = ";
 						if (SRIRT_RCPFLOAT == insn.insn.resinfo_return_type)
 						{
-							//dest.x=float(textureSize(src0,src1));
-							this->ToOperands(out, *insn.ops[0], oot | (oot << 8), false);
+							out << "1.0 / float(";
 						}
-						this->ToSingleComponentSelector(out, *insn.ops[0], 0);
-						out << " = " << c << "float(textureSize(";
+						out << "textureSize(";
 						this->ToOperands(out, *insn.ops[2], oit, false);
 						out << s;
 						out << ", ";
 						this->ToOperands(out, *insn.ops[1], oit);
-						out << "));";
+						if (SRIRT_RCPFLOAT == insn.insn.resinfo_return_type)
+						{
+							out << ")";
+						}
+						out << ");";
 						if (this->GetOperandComponentNum(*insn.ops[0]) == 2)
 						{
 							out << "\n";
@@ -3823,25 +3941,42 @@ void GLSLGen::ToInstruction(std::ostream& out, ShaderInstruction const & insn) c
 						//dest.x=float(textureSize(src0,src1).x);
 						this->ToOperands(out, *insn.ops[0], oot | (oot << 8), false);
 						this->ToSingleComponentSelector(out, *insn.ops[0], 0);
-						out << " = " << c << "float(textureSize(";
+						out << " = ";
+						if (SRIRT_RCPFLOAT == insn.insn.resinfo_return_type)
+						{
+							out << "1.0 / float(";
+						}
+						out << "textureSize(";
 						this->ToOperands(out, *insn.ops[2], oit, false);
 						out << s;
 						out << ", ";
 						this->ToOperands(out, *insn.ops[1], oit);
 						out << ")";
 						this->ToSingleComponentSelector(out, *insn.ops[0], 0);
-						out << ");\n";
+						if (SRIRT_RCPFLOAT == insn.insn.resinfo_return_type)
+						{
+							out << ")";
+						}
+						out << ";\n";
 						//dest.y=float(textureSize(src0,src1).y);
 						this->ToOperands(out, *insn.ops[0], oot | (oot << 8), false);
 						this->ToSingleComponentSelector(out, *insn.ops[0], 1);
-						out << " = " << c << "float(textureSize(";
+						out << " = ";
+						if (SRIRT_RCPFLOAT == insn.insn.resinfo_return_type)
+						{
+							out << "1.0 / float(";
+						}
 						this->ToOperands(out, *insn.ops[2], oit, false);
 						out << s;
 						out << ", ";
 						this->ToOperands(out, *insn.ops[1], oit);
 						out << ")";
 						this->ToSingleComponentSelector(out, *insn.ops[0], 1);
-						out << ");";
+						if (SRIRT_RCPFLOAT == insn.insn.resinfo_return_type)
+						{
+							out << ")";
+						}
+						out << ";";
 						if (3 == this->GetOperandComponentNum(*insn.ops[0]))
 						{
 							out << "\n";
@@ -3856,64 +3991,104 @@ void GLSLGen::ToInstruction(std::ostream& out, ShaderInstruction const & insn) c
 						break;
 
 					case SRD_TEXTURE2DMS:
-						//dest.x=float(textureSize(src0,src1).x);
+						//dest.x=float(textureSize(src0).x);
 						this->ToOperands(out, *insn.ops[0], oot | (oot << 8), false);
 						this->ToSingleComponentSelector(out, *insn.ops[0], 0);
-						out << " = " << c << "float(textureSize(";
+						out << " = ";
+						if (SRIRT_RCPFLOAT == insn.insn.resinfo_return_type)
+						{
+							out << "1.0 / float(";
+						}
+						out << "textureSize(";
 						this->ToOperands(out, *insn.ops[2], oit, false);
-						out << s;
-						out << ", ";
-						this->ToOperands(out, *insn.ops[1], oit);
-						out << ")";
+						out << s << ")";
 						this->ToSingleComponentSelector(out, *insn.ops[0], 0);
-						out << ");\n";
-						//dest.y=float(textureSize(src0,src1).y);
+						if (SRIRT_RCPFLOAT == insn.insn.resinfo_return_type)
+						{
+							out << ")";
+						}
+						out << ";\n";
+						//dest.y=float(textureSize(src0).y);
 						this->ToOperands(out, *insn.ops[0], oot | (oot << 8), false);
 						this->ToSingleComponentSelector(out, *insn.ops[0], 1);
-						out << " = " << c << "float(textureSize(";
+						out << " = ";
+						if (SRIRT_RCPFLOAT == insn.insn.resinfo_return_type)
+						{
+							out << "1.0 / float(";
+						}
+						out << "textureSize(";
 						this->ToOperands(out, *insn.ops[2], oit, false);
 						out << s;
-						out << ", ";
-						this->ToOperands(out, *insn.ops[1], oit);
 						out << ")";
 						this->ToSingleComponentSelector(out, *insn.ops[0], 1);
-						out << ");";
+						if (SRIRT_RCPFLOAT == insn.insn.resinfo_return_type)
+						{
+							out << ")";
+						}
+						out << ";";
 						break;
 
 					case SRD_TEXTURE3D:
 						//dest.x=float(textureSize(src0,src1).x);
 						this->ToOperands(out, *insn.ops[0], oot | (oot << 8), false);
 						this->ToSingleComponentSelector(out, *insn.ops[0], 0);
-						out << " = " << c << "float(textureSize(";
+						out << " = ";
+						if (SRIRT_RCPFLOAT == insn.insn.resinfo_return_type)
+						{
+							out << "1.0 / float(";
+						}
+						out << "textureSize(";
 						this->ToOperands(out, *insn.ops[2], oit, false);
 						out << s;
 						out << ", ";
 						this->ToOperands(out, *insn.ops[1], oit);
 						out << ")";
 						this->ToSingleComponentSelector(out, *insn.ops[0], 0);
-						out << ");\n";
+						if (SRIRT_RCPFLOAT == insn.insn.resinfo_return_type)
+						{
+							out << ")";
+						}
+						out << ";\n";
 						//dest.y=float(textureSize(src0,src1).y);
 						this->ToOperands(out, *insn.ops[0], oot | (oot << 8), false);
 						this->ToSingleComponentSelector(out, *insn.ops[0], 1);
-						out << " = " << c << "float(textureSize(";
+						out << " = ";
+						if (SRIRT_RCPFLOAT == insn.insn.resinfo_return_type)
+						{
+							out << "1.0 / float(";
+						}
+						out << "textureSize(";
 						this->ToOperands(out, *insn.ops[2], oit, false);
 						out << s;
 						out << ", ";
 						this->ToOperands(out, *insn.ops[1], oit);
 						out << ")";
 						this->ToSingleComponentSelector(out, *insn.ops[0], 1);
-						out << ");\n";
+						if (SRIRT_RCPFLOAT == insn.insn.resinfo_return_type)
+						{
+							out << ")";
+						}
+						out << ";\n";
 						//dest.z=float(textureSize(src0,src1).z);
 						this->ToOperands(out, *insn.ops[0], oot | (oot << 8), false);
 						this->ToSingleComponentSelector(out, *insn.ops[0], 2);
-						out << " = " << c << "float(textureSize(";
+						out << " = ";
+						if (SRIRT_RCPFLOAT == insn.insn.resinfo_return_type)
+						{
+							out << "1.0 / float(";
+						}
+						out << "textureSize(";
 						this->ToOperands(out, *insn.ops[2], oit, false);
 						out << s;
 						out << ", ";
 						this->ToOperands(out, *insn.ops[1], oit);
 						out << ")";
 						this->ToSingleComponentSelector(out, *insn.ops[0], 2);
-						out << ");";
+						if (SRIRT_RCPFLOAT == insn.insn.resinfo_return_type)
+						{
+							out << ")";
+						}
+						out << ";";
 						if (4 == this->GetOperandComponentNum(*insn.ops[0]))
 						{
 							out << "\n";
@@ -3931,25 +4106,43 @@ void GLSLGen::ToInstruction(std::ostream& out, ShaderInstruction const & insn) c
 						//dest.x=float(textureSize(src0,src1).x);
 						this->ToOperands(out, *insn.ops[0], oot | (oot << 8), false);
 						this->ToSingleComponentSelector(out, *insn.ops[0], 0);
-						out << " = " << c << "float(textureSize(";
+						out << " = ";
+						if (SRIRT_RCPFLOAT == insn.insn.resinfo_return_type)
+						{
+							out << "1.0 / float(";
+						}
+						out << "textureSize(";
 						this->ToOperands(out, *insn.ops[2], oit, false);
 						out << s;
 						out << ", ";
 						this->ToOperands(out, *insn.ops[1], oit);
 						out << ")";
 						this->ToSingleComponentSelector(out, *insn.ops[0], 0);
-						out << ");\n";
+						if (SRIRT_RCPFLOAT == insn.insn.resinfo_return_type)
+						{
+							out << ")";
+						}
+						out << ";\n";
 						//dest.y=float(textureSize(src0,src1).y);
 						this->ToOperands(out, *insn.ops[0], oot | (oot << 8), false);
 						this->ToSingleComponentSelector(out, *insn.ops[0], 1);
-						out << " = " << c << "float(textureSize(";
+						out << " = ";
+						if (SRIRT_RCPFLOAT == insn.insn.resinfo_return_type)
+						{
+							out << "1.0 / float(";
+						}
+						out << "textureSize(";
 						this->ToOperands(out, *insn.ops[2], oit, false);
 						out << s;
 						out << ", ";
 						this->ToOperands(out, *insn.ops[1], oit);
 						out << ")";
 						this->ToSingleComponentSelector(out, *insn.ops[0], 1);
-						out << ");";
+						if (SRIRT_RCPFLOAT == insn.insn.resinfo_return_type)
+						{
+							out << ")";
+						}
+						out << ";";
 						if (3 == this->GetOperandComponentNum(*insn.ops[0]))
 						{
 							out << "\n";
@@ -3967,25 +4160,34 @@ void GLSLGen::ToInstruction(std::ostream& out, ShaderInstruction const & insn) c
 						//dest.x=float(textureSize(src0,src1).x);
 						this->ToOperands(out, *insn.ops[0], oot | (oot << 8), false);
 						this->ToSingleComponentSelector(out, *insn.ops[0], 0);
-						out << " = " << c << "float(textureSize(";
+						out << " = ";
+						if (SRIRT_RCPFLOAT == insn.insn.resinfo_return_type)
+						{
+							out << "1.0 / float(";
+						}
+						out << "textureSize(";
 						this->ToOperands(out, *insn.ops[2], oit, false);
 						out << s;
 						out << ", ";
 						this->ToOperands(out, *insn.ops[1], oit);
 						out << ")";
 						this->ToSingleComponentSelector(out, *insn.ops[0], 0);
-						out << ");\n";
+						if (SRIRT_RCPFLOAT == insn.insn.resinfo_return_type)
+						{
+							out << ")";
+						}
+						out << ";\n";
 						//dest.y=float(textureSize(src0,src1).y);
 						this->ToOperands(out, *insn.ops[0], oot | (oot << 8), false);
 						this->ToSingleComponentSelector(out, *insn.ops[0], 1);
-						out << " = float(textureSize(";
+						out << " = textureSize(";
 						this->ToOperands(out, *insn.ops[2], oit, false);
 						out << s;
 						out << ", ";
 						this->ToOperands(out, *insn.ops[1], oit);
 						out << ")";
 						this->ToSingleComponentSelector(out, *insn.ops[0], 1);
-						out << ");";
+						out << ";";
 						if (3 == this->GetOperandComponentNum(*insn.ops[0]))
 						{
 							out << "\n";
@@ -4003,36 +4205,52 @@ void GLSLGen::ToInstruction(std::ostream& out, ShaderInstruction const & insn) c
 						//dest.x=float(textureSize(src0,src1).x);
 						this->ToOperands(out, *insn.ops[0], oot | (oot << 8), false);
 						this->ToSingleComponentSelector(out, *insn.ops[0], 0);
-						out << " = " << c << "float(textureSize(";
+						out << " = ";
+						if (SRIRT_RCPFLOAT == insn.insn.resinfo_return_type)
+						{
+							out << "1.0 / float(";
+						}
+						out << "textureSize(";
 						this->ToOperands(out, *insn.ops[2], oit, false);
 						out << s;
 						out << ", ";
 						this->ToOperands(out, *insn.ops[1], oit);
 						out << ")";
 						this->ToSingleComponentSelector(out, *insn.ops[0], 0);
-						out << ");\n";
+						if (SRIRT_RCPFLOAT == insn.insn.resinfo_return_type)
+						{
+							out << ")";
+						}
+						out << ";\n";
 						//dest.y=float(textureSize(src0,src1).y);
 						this->ToOperands(out, *insn.ops[0], oot | (oot << 8), false);
 						this->ToSingleComponentSelector(out, *insn.ops[0], 1);
-						out << " = " << c << "float(textureSize(";
+						if (SRIRT_RCPFLOAT == insn.insn.resinfo_return_type)
+						{
+							out << "1.0 / float(";
+						}
 						this->ToOperands(out, *insn.ops[2], oit, false);
 						out << s;
 						out << ", ";
 						this->ToOperands(out, *insn.ops[1], oit);
 						out << ")";
 						this->ToSingleComponentSelector(out, *insn.ops[0], 1);
-						out << ");\n";
+						if (SRIRT_RCPFLOAT == insn.insn.resinfo_return_type)
+						{
+							out << ")";
+						}
+						out << ";\n";
 						//dest.z=float(textureSize(src0,src1).z);
 						this->ToOperands(out, *insn.ops[0], oot | (oot << 8), false);
 						this->ToSingleComponentSelector(out, *insn.ops[0], 2);
-						out << " = float(textureSize(";
+						out << " = textureSize(";
 						this->ToOperands(out, *insn.ops[2], oit, false);
 						out << s;
 						out << ", ";
 						this->ToOperands(out, *insn.ops[1], oit);
 						out << ")";
 						this->ToSingleComponentSelector(out, *insn.ops[0], 2);
-						out << ");";
+						out << ";";
 						if (4 == this->GetOperandComponentNum(*insn.ops[0]))
 						{
 							out << "\n";
@@ -4058,39 +4276,48 @@ void GLSLGen::ToInstruction(std::ostream& out, ShaderInstruction const & insn) c
 						//but according to assemble instructions,parameters should be width,height,samples,elements
 						//-------------------------------------------------------------------------------------------
 					case SRD_TEXTURE2DMSARRAY:
-						//dest.x=float(textureSize(src0,src1).x);
+						//dest.x=float(textureSize(src0).x);
 						this->ToOperands(out, *insn.ops[0], oot | (oot << 8), false);
 						this->ToSingleComponentSelector(out, *insn.ops[0], 0);
-						out << " = " << c << "float(textureSize(";
+						out << " = ";
+						if (SRIRT_RCPFLOAT == insn.insn.resinfo_return_type)
+						{
+							out << "1.0 / float(";
+						}
+						out << "textureSize(";
 						this->ToOperands(out, *insn.ops[2], oit, false);
-						out << s;
-						out << ", ";
-						this->ToOperands(out, *insn.ops[1], oit);
-						out << ")";
+						out << s << ")";
 						this->ToSingleComponentSelector(out, *insn.ops[0], 0);
-						out << ");\n";
-						//dest.y=float(textureSize(src0,src1).y);
+						if (SRIRT_RCPFLOAT == insn.insn.resinfo_return_type)
+						{
+							out << ")";
+						}
+						out << ";\n";
+						//dest.y=float(textureSize(src0).y);
 						this->ToOperands(out, *insn.ops[0], oot | (oot << 8), false);
 						this->ToSingleComponentSelector(out, *insn.ops[0], 1);
-						out << " = " << c << "float(textureSize(";
+						out << " = ";
+						if (SRIRT_RCPFLOAT == insn.insn.resinfo_return_type)
+						{
+							out << "1.0 / float(";
+						}
+						out << "textureSize(";
 						this->ToOperands(out, *insn.ops[2], oit, false);
-						out << s;
-						out << ", ";
-						this->ToOperands(out, *insn.ops[1], oit);
-						out << ")";
+						out << s << ")";
 						this->ToSingleComponentSelector(out, *insn.ops[0], 1);
-						out << ");\n";
-						//dest.z=float(textureSize(src0,src1).z);
+						if (SRIRT_RCPFLOAT == insn.insn.resinfo_return_type)
+						{
+							out << ")";
+						}
+						out << ";\n";
+						//dest.z=float(textureSize(src0).z);
 						this->ToOperands(out, *insn.ops[0], oot | (oot << 8), false);
 						this->ToSingleComponentSelector(out, *insn.ops[0], 2);
-						out << " = float(textureSize(";
+						out << " = textureSize(";
 						this->ToOperands(out, *insn.ops[2], oit, false);
-						out << s;
-						out << ", ";
-						this->ToOperands(out, *insn.ops[1], oit);
-						out << ")";
+						out << s << ")";
 						this->ToSingleComponentSelector(out, *insn.ops[0], 2);
-						out << ");";
+						out << ";";
 						break;
 
 						//SM5 does not support query element count of cube array
@@ -4108,8 +4335,36 @@ void GLSLGen::ToInstruction(std::ostream& out, ShaderInstruction const & insn) c
 		break;
 
 	case SO_SAMPLE_INFO:
-		//dest.mask=?
-		BOOST_ASSERT_MSG(false, "for sampleinfo,there's no corresponding instruction in glsl");
+		//dest.mask=uint(textureSamples(src0));
+		for (auto const & tex : textures_)
+		{
+			if (tex.tex_index == insn.ops[0]->indices[0].disp)
+			{
+				std::string s;
+				if (!tex.samplers.empty())
+				{
+					DXBCInputBindDesc const & desc = this->GetResourceDesc(SIT_SAMPLER, static_cast<uint32_t>(tex.samplers[0].index));
+					s = std::string("_") + desc.name;
+				}
+				this->ToOperands(out, *insn.ops[0], oot | (oot << 8));
+				out << " = ";
+				if (glsl_rules_ & GSR_ExplicitMultiSample)
+				{
+					out << "uint(textureSamples(";
+					this->ToOperands(out, *insn.ops[1], oit, false);
+					out << s;
+					out << "))";
+				}
+				else
+				{
+					BOOST_ASSERT_MSG(false, "for sampleinfo, there's no corresponding instruction in glsl 4.5-");
+					out << "1";
+				}
+				out << ";";
+
+				break;
+			}
+		}
 		break;
 
 	case SO_BUFINFO:
@@ -4117,7 +4372,7 @@ void GLSLGen::ToInstruction(std::ostream& out, ShaderInstruction const & insn) c
 		{
 			for (auto const & tex : textures_)
 			{
-				if (tex.tex_index == insn.ops[2]->indices[0].disp)
+				if (tex.tex_index == insn.ops[0]->indices[0].disp)
 				{
 					std::string s;
 					if (!tex.samplers.empty())
@@ -4202,8 +4457,20 @@ void GLSLGen::ToInstruction(std::ostream& out, ShaderInstruction const & insn) c
 				BOOST_ASSERT(false);
 				break;
 			}
+			oot = this->FindTextureReturnType(*insn.ops[2]);
 			this->ToOperands(out, *insn.ops[0], oot | (oot << 8));
-			out << " = vec4(texture" << ((glsl_rules_ & GSR_GenericTexture) ? "" : texture_type)
+			out << " = ";
+			switch (oot)
+			{
+			case SIT_UInt:
+			case SIT_Int:
+				out << "i";
+				break;
+
+			default:
+				break;
+			}
+			out << "vec4(texture" << ((glsl_rules_ & GSR_GenericTexture) ? "" : texture_type)
 				<< (offset ? "Offset" : "") << "(";
 			this->ToOperands(out, *insn.ops[2], oit, false);
 			out << "_";
@@ -4291,8 +4558,20 @@ void GLSLGen::ToInstruction(std::ostream& out, ShaderInstruction const & insn) c
 				BOOST_ASSERT(false);
 				break;
 			}
+			oot = this->FindTextureReturnType(*insn.ops[2]);
 			this->ToOperands(out, *insn.ops[0], oot | (oot << 8));
-			out << " = vec4(texture" << ((glsl_rules_ & GSR_GenericTexture) ? "" : texture_type)
+			out << " = ";
+			switch (oot)
+			{
+			case SIT_UInt:
+			case SIT_Int:
+				out << "i";
+				break;
+
+			default:
+				break;
+			}
+			out << "vec4(texture" << ((glsl_rules_ & GSR_GenericTexture) ? "" : texture_type)
 				<< (offset ? "Offset" : "") << "(";
 			this->ToOperands(out, *insn.ops[2], oit, false);
 			out << "_";
@@ -4361,8 +4640,20 @@ void GLSLGen::ToInstruction(std::ostream& out, ShaderInstruction const & insn) c
 				BOOST_ASSERT(false);
 				break;
 			}
+			oot = this->FindTextureReturnType(*insn.ops[2]);
 			this->ToOperands(out, *insn.ops[0], oot | (oot << 8));
-			out << " = vec4(texture" << ((glsl_rules_ & GSR_GenericTexture) ? "" : texture_type)
+			out << " = ";
+			switch (oot)
+			{
+			case SIT_UInt:
+			case SIT_Int:
+				out << "i";
+				break;
+
+			default:
+				break;
+			}
+			out << "vec4(texture" << ((glsl_rules_ & GSR_GenericTexture) ? "" : texture_type)
 				<< (offset ? "Offset" : "") << "(";
 			this->ToOperands(out, *insn.ops[2], oit, false);
 			out << "_";
@@ -4452,8 +4743,20 @@ void GLSLGen::ToInstruction(std::ostream& out, ShaderInstruction const & insn) c
 				BOOST_ASSERT(false);
 				break;
 			}
+			oot = this->FindTextureReturnType(*insn.ops[2]);
 			this->ToOperands(out, *insn.ops[0], oot | (oot << 8));
-			out << " = vec4(texture" << ((glsl_rules_ & GSR_GenericTexture) ? "" : texture_type)
+			out << " = ";
+			switch (oot)
+			{
+			case SIT_UInt:
+			case SIT_Int:
+				out << "i";
+				break;
+
+			default:
+				break;
+			}
+			out << "vec4(texture" << ((glsl_rules_ & GSR_GenericTexture) ? "" : texture_type)
 				<< "Lod" << (offset ? "Offset" : "") << "(";
 			this->ToOperands(out, *insn.ops[2], oit, false);
 			out << "_";
@@ -4560,8 +4863,20 @@ void GLSLGen::ToInstruction(std::ostream& out, ShaderInstruction const & insn) c
 				BOOST_ASSERT(false);
 				break;
 			}
+			oot = this->FindTextureReturnType(*insn.ops[2]);
 			this->ToOperands(out, *insn.ops[0], oot | (oot << 8));
-			out << " = vec4(texture" << ((glsl_rules_ & GSR_GenericTexture) ? "" : texture_type)
+			out << " = ";
+			switch (oot)
+			{
+			case SIT_UInt:
+			case SIT_Int:
+				out << "i";
+				break;
+
+			default:
+				break;
+			}
+			out << "vec4(texture" << ((glsl_rules_ & GSR_GenericTexture) ? "" : texture_type)
 				<< "Lod" << (offset ? "Offset" : "") << "(";
 			this->ToOperands(out, *insn.ops[2], oit, false);
 			out << "_";
@@ -4657,8 +4972,20 @@ void GLSLGen::ToInstruction(std::ostream& out, ShaderInstruction const & insn) c
 				BOOST_ASSERT(false);
 				break;
 			}
+			oot = this->FindTextureReturnType(*insn.ops[2]);
 			this->ToOperands(out, *insn.ops[0], oot | (oot << 8));
-			out << " = vec4(texture" << ((glsl_rules_ & GSR_GenericTexture) ? "" : texture_type)
+			out << " = ";
+			switch (oot)
+			{
+			case SIT_UInt:
+			case SIT_Int:
+				out << "i";
+				break;
+
+			default:
+				break;
+			}
+			out << "vec4(texture" << ((glsl_rules_ & GSR_GenericTexture) ? "" : texture_type)
 				<< ((glsl_rules_ & GSR_TextureGrad) ? "Grad"  : "") << (offset ? "Offset" : "") << "(";
 			this->ToOperands(out, *insn.ops[2], oit, false);
 			out << "_";
@@ -4808,8 +5135,20 @@ void GLSLGen::ToInstruction(std::ostream& out, ShaderInstruction const & insn) c
 						BOOST_ASSERT(false);
 						break;
 					}
+					oot = this->FindTextureReturnType(*insn.ops[2]);
 					this->ToOperands(out, *insn.ops[0], oot | (oot << 8));
-					out << " = vec4(texelFetch";
+					out << " = ";
+					switch (oot)
+					{
+					case SIT_UInt:
+					case SIT_Int:
+						out << "i";
+						break;
+
+					default:
+						break;
+					}
+					out << "vec4(texelFetch";
 					if (lod)
 					{
 						out << "Offset";
@@ -4922,8 +5261,20 @@ void GLSLGen::ToInstruction(std::ostream& out, ShaderInstruction const & insn) c
 				BOOST_ASSERT(false);
 				break;
 			}
+			oot = this->FindTextureReturnType(*insn.ops[2]);
 			this->ToOperands(out, *insn.ops[0], oot | (oot << 8));
-			out << " = vec4(textureGather";
+			out << " = ";
+			switch (oot)
+			{
+			case SIT_UInt:
+			case SIT_Int:
+				out << "i";
+				break;
+
+			default:
+				break;
+			}
+			out << "vec4(textureGather";
 			if (offset)
 			{
 				out << "Offset(";
@@ -4984,8 +5335,20 @@ void GLSLGen::ToInstruction(std::ostream& out, ShaderInstruction const & insn) c
 				BOOST_ASSERT(false);
 				break;
 			}
+			oot = this->FindTextureReturnType(*insn.ops[2]);
 			this->ToOperands(out, *insn.ops[0], oot | (oot << 8));
-			out << " = vec4(textureGather";
+			out << " = ";
+			switch (oot)
+			{
+			case SIT_UInt:
+			case SIT_Int:
+				out << "i";
+				break;
+
+			default:
+				break;
+			}
+			out << "vec4(textureGather";
 			if (offset)
 			{
 				out << "Offset(";
@@ -5035,8 +5398,20 @@ void GLSLGen::ToInstruction(std::ostream& out, ShaderInstruction const & insn) c
 				BOOST_ASSERT(false);
 				break;
 			}
+			oot = this->FindTextureReturnType(*insn.ops[2]);
 			this->ToOperands(out, *insn.ops[0], oot | (oot << 8));
-			out << " = vec4(textureGatherOffset(";
+			out << " = ";
+			switch (oot)
+			{
+			case SIT_UInt:
+			case SIT_Int:
+				out << "i";
+				break;
+
+			default:
+				break;
+			}
+			out << "vec4(textureGatherOffset(";
 			this->ToOperands(out, *insn.ops[3], oit, false);
 			out << "_";
 			this->ToOperands(out, *insn.ops[4], oit, false);
@@ -5076,8 +5451,20 @@ void GLSLGen::ToInstruction(std::ostream& out, ShaderInstruction const & insn) c
 				BOOST_ASSERT(false);
 				break;
 			}
+			oot = this->FindTextureReturnType(*insn.ops[2]);
 			this->ToOperands(out, *insn.ops[0], oot | (oot << 8));
-			out << " = vec4(textureGatherOffset(";
+			out << " = ";
+			switch (oot)
+			{
+			case SIT_UInt:
+			case SIT_Int:
+				out << "i";
+				break;
+
+			default:
+				break;
+			}
+			out << "vec4(textureGatherOffset(";
 			this->ToOperands(out, *insn.ops[3], oit, false);
 			out << "_";
 			this->ToOperands(out, *insn.ops[4], oit, false);
@@ -5878,6 +6265,47 @@ void GLSLGen::ToOperands(std::ostream& out, ShaderOperand const & op, uint32_t i
 	}
 }
 
+ShaderImmType GLSLGen::OperandAsCBufferType(
+	uint32_t imm_as_type, uint32_t offset, uint32_t var_start_offset, DXBCShaderTypeDesc const& var_type_desc) const
+{
+	ShaderImmType as_type = static_cast<ShaderImmType>(imm_as_type >> 8);
+	if (var_type_desc.var_class == SVC_STRUCT)
+	{
+		uint32_t const in_struct_offset = offset - var_start_offset;
+		for (int m = var_type_desc.members - 1; m >= 0; --m)
+		{
+			if (in_struct_offset >= var_type_desc.member_desc[m].start_offset)
+			{
+				as_type = this->OperandAsCBufferType(imm_as_type, in_struct_offset, 0, var_type_desc.member_desc[m].type);
+				break;
+			}
+		}
+	}
+	else
+	{
+		switch (var_type_desc.type)
+		{
+		case SVT_INT:
+			as_type = SIT_Int;
+			break;
+
+		case SVT_UINT:
+			as_type = SIT_UInt;
+			break;
+
+		case SVT_FLOAT:
+			as_type = SIT_Float;
+			break;
+
+		default:
+			BOOST_ASSERT(false);
+			break;
+		}
+	}
+
+	return as_type;
+}
+
 ShaderImmType GLSLGen::OperandAsType(ShaderOperand const & op, uint32_t imm_as_type) const
 {
 	ShaderImmType imm_type = static_cast<ShaderImmType>(imm_as_type & 0xFF);
@@ -6000,24 +6428,8 @@ ShaderImmType GLSLGen::OperandAsType(ShaderOperand const & op, uint32_t imm_as_t
 							if ((offset >= var.var_desc.start_offset)
 								&& (var.var_desc.start_offset + var.var_desc.size > offset))
 							{
-								switch (var.type_desc.type)
-								{
-								case SVT_INT:
-									as_type = SIT_Int;
-									break;
-
-								case SVT_UINT:
-									as_type = SIT_UInt;
-									break;
-
-								case SVT_FLOAT:
-									as_type = SIT_Float;
-									break;
-
-								default:
-									BOOST_ASSERT(false);
-									break;
-								}
+								as_type = this->OperandAsCBufferType(imm_as_type, offset, var.var_desc.start_offset, var.type_desc);
+								break;
 							}
 						}
 					}
@@ -6031,6 +6443,301 @@ ShaderImmType GLSLGen::OperandAsType(ShaderOperand const & op, uint32_t imm_as_t
 	}
 
 	return as_type;
+}
+
+void GLSLGen::ToOperandName(std::ostream& out, ShaderOperand const& op, DXBCShaderTypeDesc const& type_desc, const char* var_name,
+	uint32_t var_start_offset, std::vector<DXBCShaderVariable> const& cb_vars, uint32_t offset, bool contain_multi_var,
+	bool dynamic_indexed, uint32_t register_index, uint32_t num_selectors, bool no_swizzle, bool& need_comps) const
+{
+	/// if cb member is a array,this is element count, 0 if not a array
+	uint32_t element_count = type_desc.elements;
+	// find corresponding cb member array element index if it's a array
+	uint32_t element_index = 0;
+
+	switch (type_desc.var_class)
+	{
+	case SVC_VECTOR:
+	case SVC_SCALAR:
+		if (contain_multi_var)
+		{
+			//if a current register references more than one variable,things become more
+			//complex:
+			//e.g.
+			//|a[3].x|a[3].y|b   |c   |->this is a register,a b c are variables,a is an array
+			//|.x    |.y    |.z  |.w  |->this is register component
+			//current register reference is .yzw
+			//so we should convert it to :
+			//[i|u]vec{2,3,4}(a[3].y,b.x,c.x)
+			need_comps = false;
+			switch (type_desc.type)
+			{
+			case SVT_INT:
+				out << "i";
+				break;
+
+			case SVT_UINT:
+				if (glsl_rules_ & GSR_UIntType)
+				{
+					out << "u";
+				}
+				else
+				{
+					out << "i";
+				}
+				break;
+
+			case SVT_FLOAT:
+				break;
+
+			default:
+				BOOST_ASSERT(false);
+				break;
+			}
+			out << "vec" << num_selectors;
+			out << "(";
+			for (uint32_t i = 0; i < num_selectors; ++i)
+			{
+				if (i != 0)
+				{
+					out << ", ";
+				}
+
+				uint32_t register_selector = this->GetComponentSelector(op, i);
+				// find the cb member this register selector correspond to
+				// TODO: Check the O(N^2) here
+				uint32_t offset2 = 16 * register_index + register_selector * 4;
+				for (auto const& var2 : cb_vars)
+				{
+					if ((offset2 >= var2.var_desc.start_offset)
+						&& (var2.var_desc.start_offset + var2.var_desc.size > offset2))
+					{
+						out << var2.var_desc.name;
+						uint32_t element_count2 = var2.type_desc.elements;
+						// ajudge which cb member array element it's located in
+						if (element_count2)
+						{
+							element_index = (16 * register_index - var2.var_desc.start_offset) / 16;
+							out << "[" << element_index << "]";
+						}
+
+						if ((SVC_VECTOR == var2.type_desc.var_class) && !no_swizzle)
+						{
+							// remap register selector to the right cb member variable component
+							out << ".";
+							// for array,doesn't need to remap because array element is always at the start of a register,since
+							// array is not packed.
+							if (element_count2)
+							{
+								out << "xyzw"[register_selector];
+							}
+							else
+							{
+								// remap
+								uint32_t variable_offset = var2.var_desc.start_offset;
+								uint32_t register_component_offset = 16 * register_index + 4 * this->GetComponentSelector(op, i);
+								uint32_t remapped_component = (register_component_offset - variable_offset) / 4;
+								out << "xyzw"[remapped_component];
+							}
+						}
+
+						break;
+					}
+				}
+			}
+			out << ")";
+		}
+		else
+		{
+			out << var_name;
+			if (element_count != 0)
+			{
+				out << "[";
+				if (dynamic_indexed && op.indices[1].reg)
+				{
+					this->ToOperands(out, *op.indices[1].reg, SIT_Int);
+				}
+				else
+				{
+					element_index = (16 * register_index - var_start_offset) / 16;
+					out << element_index;
+				}
+				out << "]";
+			}
+			else
+			{
+				// array is not packed, so doesn't need remap component_selector
+				// if not, because of register packing, we need to remap it.
+				// see: http://msdn.microsoft.com/zh-cn/library/windows/desktop/bb509632
+
+				need_comps = false;
+				if ((SVC_VECTOR == type_desc.var_class) && !no_swizzle)
+				{
+					// remap register component to the right cb member variable component
+					// example case:
+					// |a  |b  |c.x|c.y|->this is a register,a b c is three variables
+					// |.x |.y |.z |.w |->this is register component
+					// so we need to remap .zw to .xy
+					for (uint32_t i = 0; i < num_selectors; ++i)
+					{
+						if (i == 0)
+						{
+							out << ".";
+						}
+						uint32_t register_component_offset = 16 * register_index + 4 * this->GetComponentSelector(op, i);
+						uint32_t remapped_component = (register_component_offset - var_start_offset) / 4;
+						out << "xyzw"[remapped_component];
+					}
+				}
+			}
+
+			if (SVC_SCALAR == type_desc.var_class)
+			{
+				need_comps = false;
+			}
+		}
+		break;
+
+	case SVC_MATRIX_ROWS:
+	case SVC_MATRIX_COLUMNS:
+		{
+			//hlsl matrix subscript is opposite to glsl
+			//e.g.in hlsl mat[2][3] <=>in glsl mat[3][2]
+			//so mat[2].xyzw in hlsl<=>vec4(mat[0][2],mat[1][2],mat[2][2],mat[3][2]) in glsl
+
+			BOOST_ASSERT_MSG(!contain_multi_var, "Matrix will not be packed?");
+
+			//indicate how many registers a matrix array element occupies
+			uint32_t register_stride;
+			if (SVC_MATRIX_ROWS == type_desc.var_class)
+			{
+				register_stride = type_desc.rows;
+			}
+			else
+			{
+				register_stride = type_desc.columns;
+			}
+			if (element_count != 0)
+			{
+				//identify which matrix array element it's loacated in
+				element_index = (16 * register_index - var_start_offset) / 16 / register_stride;
+			}
+			uint32_t row = (16 * register_index - var_start_offset) / 16 - element_index * register_stride;
+			uint32_t count = this->GetOperandComponentNum(op);
+			if (count == 1)
+			{
+				out << "float";
+			}
+			else
+			{
+				out << "vec" << count;//glsl only support float or double matrix 
+			}
+			out << "(";
+			for (uint32_t i = 0; i < count; ++i)
+			{
+				if (i > 0)
+				{
+					out << ", ";
+				}
+				//convert component selector to column number
+				//x y z w--> 0 1 2 3
+				uint32_t column = this->GetComponentSelector(op, i);
+				out << var_name;
+				if (glsl_rules_ & GSR_MatrixType)
+				{
+					if (element_count)
+					{
+						out << "[";
+						if (dynamic_indexed && op.indices[1].reg)
+						{
+							this->ToOperands(out, *op.indices[1].reg, SIT_Int);
+						}
+						else
+						{
+							out << element_index;
+						}
+						// The index is in float4. So for 4x4 matrix, divide by register_stride
+						out << " / " << register_stride;
+						out << "]";
+					}
+					if (SVC_MATRIX_ROWS == type_desc.var_class)
+					{
+						out << "[" << column << "]" << "[" << row << "]";
+					}
+					else
+					{
+						out << "[" << row << "]" << "[" << column << "]";
+					}
+				}
+				else
+				{
+					out << "[";
+					if (element_count)
+					{
+						if (dynamic_indexed && op.indices[1].reg)
+						{
+							this->ToOperands(out, *op.indices[1].reg, SIT_Int);
+						}
+						else
+						{
+							out << element_index;
+						}
+						out << " + ";
+					}
+					if (SVC_MATRIX_ROWS == type_desc.var_class)
+					{
+						out << column;
+					}
+					else
+					{
+						out << row;
+					}
+					out << "][";
+					if (SVC_MATRIX_ROWS == type_desc.var_class)
+					{
+						out << row;
+					}
+					else
+					{
+						out << column;
+					}
+					out << "]";
+				}
+			}
+			out << ")";
+			need_comps = false;
+		}
+		break;
+
+	case SVC_STRUCT:
+		{
+			uint32_t const struct_size = type_desc.columns * 4;
+			element_index = (16 * register_index - var_start_offset) / struct_size;
+			uint32_t const element_offset = (16 * register_index - var_start_offset) - element_index * struct_size;
+
+			std::string struct_prefix = std::string(var_name);
+			if (element_count != 0)
+			{
+				struct_prefix += '[' + std::to_string(element_index) + ']';
+			}
+			struct_prefix += '.';
+
+			for (int m = type_desc.members - 1; m >= 0; --m)
+			{
+				if (element_offset >= type_desc.member_desc[m].start_offset)
+				{
+					this->ToOperandName(out, op, type_desc.member_desc[m].type, (struct_prefix + type_desc.member_desc[m].name).c_str(),
+						type_desc.member_desc[m].start_offset, cb_vars, offset - var_start_offset, false, dynamic_indexed,
+						element_offset / 16, num_selectors, no_swizzle, need_comps);
+					break;
+				}
+			}
+		}
+		break;
+
+	default:
+		BOOST_ASSERT_MSG(false, "Unhandled type");
+		break;
+	}
 }
 
 void GLSLGen::ToOperandName(std::ostream& out, ShaderOperand const & op, ShaderImmType as_type,
@@ -6050,11 +6757,20 @@ void GLSLGen::ToOperandName(std::ostream& out, ShaderOperand const & op, ShaderI
 			}
 			else if (0 == strcmp(param_desc.semantic_name, "SV_SampleIndex"))
 			{
+				*need_comps = false;
 				*need_idx = false;
-				out << "gl_SampleID";
+				if (glsl_rules_ & GSR_ExplicitMultiSample)
+				{
+					out << "gl_SampleID";
+				}
+				else
+				{
+					out << "0";
+				}
 			}
 			else if (0 == strcmp(param_desc.semantic_name, "SV_PrimitiveID"))
 			{
+				*need_comps = false;
 				*need_idx = false;
 				out << "gl_PrimitiveID";
 			}
@@ -6297,7 +7013,7 @@ void GLSLGen::ToOperandName(std::ostream& out, ShaderOperand const & op, ShaderI
 	else if (SOT_RESOURCE == op.type)
 	{
 		ShaderInputType type = SIT_TEXTURE;
-		if(SIT_UNDEFINED != sit)
+		if (SIT_UNDEFINED != sit)
 		{
 			type = sit;
 		}
@@ -6364,229 +7080,8 @@ void GLSLGen::ToOperandName(std::ostream& out, ShaderOperand const & op, ShaderI
 						}
 						BOOST_ASSERT_MSG(var.has_type_desc, "Constant buffer should have type desc");
 
-						// if cb member is a array,this is element count, 0 if not a array
-						uint32_t element_count = var.type_desc.elements;
-						// find corresponding cb member array element index if it's a array
-						uint32_t element_index = 0;
-
-						switch (var.type_desc.var_class)
-						{
-						case SVC_VECTOR:
-						case SVC_SCALAR:
-							if (contain_multi_var)
-							{
-
-								//if a current register references more than one variable,things become more
-								//complex:
-								//e.g.
-								//|a[3].x|a[3].y|b   |c   |->this is a register,a b c are variables,a is an array
-								//|.x    |.y    |.z  |.w  |->this is register component
-								//current register reference is .yzw
-								//so we should convert it to :
-								//[i|u]vec{2,3,4}(a[3].y,b.x,c.x)
-								*need_comps = false;
-								switch (var.type_desc.type)
-								{
-								case SVT_INT:
-									out << "i";
-									break;
-
-								case SVT_UINT:
-									if (glsl_rules_ & GSR_UIntType)
-									{
-										out << "u";
-									}
-									else
-									{
-										out << "i";
-									}
-									break;
-
-								case SVT_FLOAT:
-									break;
-
-								default:
-									BOOST_ASSERT(false);
-									break;
-								}
-								out << "vec" << num_selectors;
-								out << "(";
-								for (uint32_t i = 0; i < num_selectors; ++ i)
-								{
-									if (i != 0)
-									{
-										out << ", ";
-									}
-
-									uint32_t register_selector = this->GetComponentSelector(op, i);
-									// find the cb member this register selector correspond to
-									// TODO: Check the O(N^2) here
-									uint32_t offset2 = 16 * register_index + register_selector * 4;
-									for (auto const & var2 : cb.vars)
-									{
-										if ((offset2 >= var2.var_desc.start_offset)
-											&& (var2.var_desc.start_offset + var2.var_desc.size > offset2))
-										{
-											out << var2.var_desc.name;
-											uint32_t element_count2 = var2.type_desc.elements;
-											// ajudge which cb member array element it's located in
-											if (element_count2)
-											{
-												element_index = (16 * register_index - var2.var_desc.start_offset) / 16;
-												out << "[" << element_index << "]";
-											}
-
-											if ((SVC_VECTOR == var2.type_desc.var_class) && !no_swizzle)
-											{
-												// remap register selector to the right cb member variable component
-												out << ".";
-												// for array,doesn't need to remap because array element is always at the start of a register,since
-												// array is not packed.
-												if (element_count2)
-												{
-													out << "xyzw"[register_selector];
-												}
-												else
-												{
-													// remap
-													uint32_t variable_offset = var2.var_desc.start_offset;
-													uint32_t register_component_offset = 16 * register_index + 4 * this->GetComponentSelector(op, i);
-													uint32_t remapped_component = (register_component_offset - variable_offset) / 4;
-													out << "xyzw"[remapped_component];
-												}
-											}
-
-											break;
-										}
-									}
-								}
-								out << ")";
-							}
-							else
-							{
-								out << var.var_desc.name;
-								if (element_count != 0)
-								{
-									out << "[";
-									if (dynamic_indexed && op.indices[1].reg)
-									{
-										this->ToOperands(out, *op.indices[1].reg, SIT_Int);
-									}
-									else
-									{
-										element_index = (16 * register_index - var.var_desc.start_offset) / 16;
-										out << element_index;
-									}
-									out << "]";
-								}
-								else
-								{
-									// array is not packed, so doesn't need remap component_selector
-									// if not, because of register packing, we need to remap it.
-									// see: http://msdn.microsoft.com/zh-cn/library/windows/desktop/bb509632
-
-									*need_comps = false;
-									if ((SVC_VECTOR == var.type_desc.var_class) && !no_swizzle)
-									{
-										// remap register component to the right cb member variable component
-										// example case:
-										// |a  |b  |c.x|c.y|->this is a register,a b c is three variables
-										// |.x |.y |.z |.w |->this is register component
-										// so we need to remap .zw to .xy
-										for (uint32_t i = 0; i < num_selectors; ++ i)
-										{
-											if (i == 0)
-											{
-												out << ".";
-											}
-											uint32_t variable_offset = var.var_desc.start_offset;
-											uint32_t register_component_offset = 16 * register_index + 4 * this->GetComponentSelector(op, i);
-											uint32_t remapped_component = (register_component_offset - variable_offset) / 4;
-											out << "xyzw"[remapped_component];
-										}
-									}
-								}
-
-								if (SVC_SCALAR == var.type_desc.var_class)
-								{
-									*need_comps = false;
-								}
-							}
-							break;
-
-						case SVC_MATRIX_ROWS:
-						case SVC_MATRIX_COLUMNS:
-							{
-								//hlsl matrix subscript is opposite to glsl
-								//e.g.in hlsl mat[2][3] <=>in glsl mat[3][2]
-								//so mat[2].xyzw in hlsl<=>vec4(mat[0][2],mat[1][2],mat[2][2],mat[3][2]) in glsl
-
-								BOOST_ASSERT_MSG(!contain_multi_var, "Matrix will not be packed?");
-
-								//indicate how many registers a matrix array element occupies
-								uint32_t register_stride;
-								if (SVC_MATRIX_ROWS == var.type_desc.var_class)
-								{
-									register_stride = var.type_desc.rows;
-								}
-								else
-								{
-									register_stride = var.type_desc.columns;
-								}
-								if (element_count != 0)
-								{
-									//identify which matrix array element it's loacated in
-									element_index = (16 * register_index - var.var_desc.start_offset) / 16 / register_stride;
-								}
-								uint32_t row = (16 * register_index - var.var_desc.start_offset) / 16 - element_index * register_stride;
-								uint32_t count = this->GetOperandComponentNum(op);
-								if (count == 1)
-								{
-									out << "float";
-								}
-								else out << "vec" << count;//glsl only support float or double matrix 
-								out << "(";
-								for (uint32_t i = 0; i < count; ++ i)
-								{
-									if (i > 0)
-									{
-										out << ", ";
-									}
-									//convert component selector to column number
-									//x y z w--> 0 1 2 3
-									uint32_t column = this->GetComponentSelector(op, i);
-									out << var.var_desc.name;
-									if (element_count)
-									{
-										out << "[";
-										if (dynamic_indexed && op.indices[1].reg)
-										{
-											this->ToOperands(out, *op.indices[1].reg, SIT_Int);
-										}
-										else
-										{
-											out << element_index;
-										}
-										out << "]";
-									}
-									if (SVC_MATRIX_ROWS == var.type_desc.var_class)
-									{
-										out << "[" << column << "]" << "[" << row << "]";
-									}
-									else
-									{
-										out << "[" << row << "]" << "[" << column << "]";
-									}
-								}
-								out << ")";
-								*need_comps = false;
-								}
-							break;
-
-						default:
-							BOOST_ASSERT_MSG(false, "Unhandled type");
-							break;
-						}
+						this->ToOperandName(out, op, var.type_desc, var.var_desc.name, var.var_desc.start_offset, cb.vars, offset,
+							contain_multi_var, dynamic_indexed, register_index, num_selectors, no_swizzle, *need_comps);
 
 						break;
 					}
@@ -7831,6 +8326,7 @@ void GLSLGen::ToCopyToInterShaderPatchConstantRecords(std::ostream& out)const
 				{
 					out << "gl_TessLevelOuter[" << sig_desc.semantic_index << ']';
 				}
+				need_comps = false;
 				break;
 
 			case SN_UNDEFINED:
@@ -7976,7 +8472,11 @@ void GLSLGen::ToDclInterShaderPatchConstantRecords(std::ostream& out)
 				out << "vec" << num_comps;
 			}
 			out << " v_" << sig_desc.semantic_name << sig_desc.semantic_index;
-			if ((ST_HS == shader_type_) || (ST_DS == shader_type_))
+			if (ST_HS == shader_type_)
+			{
+				out << "In[" << program_->hs_output_control_point_count << "]";
+			}
+			else if (ST_DS == shader_type_)
 			{
 				out << "In[gl_MaxPatchVertices]";
 			}
@@ -8039,4 +8539,36 @@ void GLSLGen::ToCopyToInterShaderPatchConstantRegisters(std::ostream& out)const
 			out << ";\n";
 		}
 	}
+}
+
+ShaderImmType GLSLGen::FindTextureReturnType(ShaderOperand const & op) const
+{
+	ShaderImmType ret;
+	DXBCInputBindDesc const & desc = this->GetResourceDesc(SIT_TEXTURE, static_cast<uint32_t>(op.indices[0].disp));
+	switch (desc.return_type)
+	{
+	case SRRT_UINT:
+		if (glsl_rules_ & GSR_UIntType)
+		{
+			ret = SIT_UInt;
+		}
+		else
+		{
+			ret = SIT_Int;
+		}
+		break;
+
+	case SRRT_SINT:
+		ret = SIT_Int;
+		break;
+
+	case SRRT_DOUBLE:
+		ret = SIT_Double;
+		break;
+
+	default:
+		ret = SIT_Float;
+		break;
+	}
+	return ret;
 }

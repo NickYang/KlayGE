@@ -36,6 +36,18 @@
 #include <iosfwd>
 #include <vector>
 
+#include <boost/noncopyable.hpp>
+
+namespace rapidxml
+{
+	template <typename Ch>
+	class xml_node;
+	template <typename Ch>
+	class xml_attribute;
+	template <typename Ch>
+	class xml_document;
+}
+
 namespace KlayGE
 {
 	enum XMLNodeType
@@ -50,77 +62,77 @@ namespace KlayGE
 		XNT_PI
 	};
 
-	class XMLDocument
+	class XMLDocument : boost::noncopyable
 	{
 	public:
 		XMLDocument();
 
-		XMLNodePtr Parse(ResIdentifierPtr const & source);
+		XMLNodePtr Parse(ResIdentifier& source);
 		void Print(std::ostream& os);
 
-		XMLNodePtr CloneNode(XMLNodePtr const & node);
+		XMLNodePtr CloneNode(XMLNode const& node);
 
-		XMLNodePtr AllocNode(XMLNodeType type, std::string const & name);
-		XMLAttributePtr AllocAttribInt(std::string const & name, int32_t value);
-		XMLAttributePtr AllocAttribUInt(std::string const & name, uint32_t value);
-		XMLAttributePtr AllocAttribFloat(std::string const & name, float value);
-		XMLAttributePtr AllocAttribString(std::string const & name, std::string const & value);
+		XMLNodePtr AllocNode(XMLNodeType type, std::string_view name);
+		XMLAttributePtr AllocAttribInt(std::string_view name, int32_t value);
+		XMLAttributePtr AllocAttribUInt(std::string_view name, uint32_t value);
+		XMLAttributePtr AllocAttribFloat(std::string_view name, float value);
+		XMLAttributePtr AllocAttribString(std::string_view name, std::string_view value);
 
 		void RootNode(XMLNodePtr const & new_node);
 
 	private:
-		std::shared_ptr<void> doc_;
+		std::shared_ptr<rapidxml::xml_document<char>> doc_;
 		std::vector<char> xml_src_;
 
 		XMLNodePtr root_;
 	};
 
-	class XMLNode
+	class XMLNode : boost::noncopyable
 	{
 		friend class XMLDocument;
 
 	public:
-		explicit XMLNode(void* node);
-		XMLNode(void* doc, XMLNodeType type, std::string const & name);
+		explicit XMLNode(rapidxml::xml_node<char>* node);
+		XMLNode(rapidxml::xml_document<char>& doc, XMLNodeType type, std::string_view name);
 
-		std::string const & Name() const;
+		std::string_view Name() const;
 		XMLNodeType Type() const;
 
-		XMLNodePtr Parent();
+		XMLNodePtr Parent() const;
 
-		XMLAttributePtr FirstAttrib(std::string const & name);
-		XMLAttributePtr LastAttrib(std::string const & name);
-		XMLAttributePtr FirstAttrib();
-		XMLAttributePtr LastAttrib();
+		XMLAttributePtr FirstAttrib(std::string_view name) const;
+		XMLAttributePtr LastAttrib(std::string_view name) const;
+		XMLAttributePtr FirstAttrib() const;
+		XMLAttributePtr LastAttrib() const;
 
-		XMLAttributePtr Attrib(std::string const & name);
+		XMLAttributePtr Attrib(std::string_view name) const;
 
-		bool TryConvertAttrib(std::string const & name, int32_t& val, int32_t default_val);
-		bool TryConvertAttrib(std::string const & name, uint32_t& val, uint32_t default_val);
-		bool TryConvertAttrib(std::string const & name, float& val, float default_val);
+		bool TryConvertAttrib(std::string_view name, int32_t& val, int32_t default_val) const;
+		bool TryConvertAttrib(std::string_view name, uint32_t& val, uint32_t default_val) const;
+		bool TryConvertAttrib(std::string_view name, float& val, float default_val) const;
 
-		int32_t AttribInt(std::string const & name, int32_t default_val);
-		uint32_t AttribUInt(std::string const & name, uint32_t default_val);
-		float AttribFloat(std::string const & name, float default_val);
-		std::string AttribString(std::string const & name, std::string default_val);
+		int32_t AttribInt(std::string_view name, int32_t default_val) const;
+		uint32_t AttribUInt(std::string_view name, uint32_t default_val) const;
+		float AttribFloat(std::string_view name, float default_val) const;
+		std::string_view AttribString(std::string_view name, std::string_view default_val) const;
 
-		XMLNodePtr FirstNode(std::string const & name);
-		XMLNodePtr LastNode(std::string const & name);
-		XMLNodePtr FirstNode();
-		XMLNodePtr LastNode();
+		XMLNodePtr FirstNode(std::string_view name) const;
+		XMLNodePtr LastNode(std::string_view name) const;
+		XMLNodePtr FirstNode() const;
+		XMLNodePtr LastNode() const;
 
-		XMLNodePtr PrevSibling(std::string const & name);
-		XMLNodePtr NextSibling(std::string const & name);
-		XMLNodePtr PrevSibling();
-		XMLNodePtr NextSibling();
+		XMLNodePtr PrevSibling(std::string_view name) const;
+		XMLNodePtr NextSibling(std::string_view name) const;
+		XMLNodePtr PrevSibling() const;
+		XMLNodePtr NextSibling() const;
 
-		void InsertNode(XMLNodePtr const & location, XMLNodePtr const & new_node);
-		void InsertAttrib(XMLAttributePtr const & location, XMLAttributePtr const & new_attr);
+		void InsertNode(XMLNode const& location, XMLNodePtr const & new_node);
+		void InsertAttrib(XMLAttribute const& location, XMLAttributePtr const & new_attr);
 		void AppendNode(XMLNodePtr const & new_node);
 		void AppendAttrib(XMLAttributePtr const & new_attr);
 
-		void RemoveNode(XMLNodePtr const & node);
-		void RemoveAttrib(XMLAttributePtr const & attr);
+		void RemoveNode(XMLNode const& node);
+		void RemoveAttrib(XMLAttribute const& attr);
 
 		bool TryConvert(int32_t& val) const;
 		bool TryConvert(uint32_t& val) const;
@@ -129,29 +141,29 @@ namespace KlayGE
 		int32_t ValueInt() const;
 		uint32_t ValueUInt() const;
 		float ValueFloat() const;
-		std::string ValueString() const;
+		std::string_view ValueString() const;
 
 	private:
-		void* node_;
-		std::string name_;
+		rapidxml::xml_node<char>* node_;
+		std::string_view name_;
 
 		std::vector<XMLNodePtr> children_;
 		std::vector<XMLAttributePtr> attrs_;
 	};
 
-	class XMLAttribute
+	class XMLAttribute : boost::noncopyable
 	{
 		friend class XMLDocument;
 		friend class XMLNode;
 
 	public:
-		explicit XMLAttribute(void* attr);
-		XMLAttribute(void* doc, std::string const & name, std::string const & value);
+		explicit XMLAttribute(rapidxml::xml_attribute<char>* attr);
+		XMLAttribute(rapidxml::xml_document<char>& doc, std::string_view name, std::string_view value);
 
-		std::string const & Name() const;
+		std::string_view Name() const;
 
-		XMLAttributePtr NextAttrib(std::string const & name);
-		XMLAttributePtr NextAttrib();
+		XMLAttributePtr NextAttrib(std::string_view name) const;
+		XMLAttributePtr NextAttrib() const;
 
 		bool TryConvert(int32_t& val) const;
 		bool TryConvert(uint32_t& val) const;
@@ -160,12 +172,12 @@ namespace KlayGE
 		int32_t ValueInt() const;
 		uint32_t ValueUInt() const;
 		float ValueFloat() const;
-		std::string const & ValueString() const;
+		std::string_view ValueString() const;
 
 	private:
-		void* attr_;
-		std::string name_;
-		std::string value_;
+		rapidxml::xml_attribute<char>* attr_;
+		std::string_view name_;
+		std::string_view value_;
 	};
 }
 

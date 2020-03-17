@@ -40,12 +40,12 @@
 namespace KlayGE
 {
 	template <typename T>
-	class Quaternion_T : boost::addable<Quaternion_T<T>,
-						boost::subtractable<Quaternion_T<T>,
-						boost::dividable2<Quaternion_T<T>, T,
-						boost::multipliable<Quaternion_T<T>,
-						boost::multipliable2<Quaternion_T<T>, T,
-						boost::equality_comparable<Quaternion_T<T>>>>>>>
+	class Quaternion_T final : boost::addable<Quaternion_T<T>,
+								boost::subtractable<Quaternion_T<T>,
+								boost::dividable2<Quaternion_T<T>, T,
+								boost::multipliable<Quaternion_T<T>,
+								boost::multipliable2<Quaternion_T<T>, T,
+								boost::equality_comparable<Quaternion_T<T>>>>>>>
 	{
 	public:
 		enum { elem_num = 4 };
@@ -62,96 +62,110 @@ namespace KlayGE
 		typedef typename Vector_T<T, elem_num>::const_iterator const_iterator;
 
 	public:
-		Quaternion_T() KLAYGE_NOEXCEPT
+		constexpr Quaternion_T() noexcept
 		{
 		}
-		explicit Quaternion_T(T const * rhs) KLAYGE_NOEXCEPT;
-		Quaternion_T(Vector_T<T, 3> const & vec, T s) KLAYGE_NOEXCEPT;
-		Quaternion_T(Quaternion_T const & rhs) KLAYGE_NOEXCEPT;
-		Quaternion_T(Quaternion_T&& rhs) KLAYGE_NOEXCEPT;
-		Quaternion_T(T x, T y, T z, T w) KLAYGE_NOEXCEPT;
+		explicit constexpr Quaternion_T(T const * rhs) noexcept
+			: quat_(rhs)
+		{
+		}
+		constexpr Quaternion_T(Vector_T<T, 3> const & vec, T s) noexcept
+			: quat_(vec.x(), vec.y(), vec.z(), s)
+		{
+		}
+		Quaternion_T(Quaternion_T const & rhs) noexcept;
+		Quaternion_T(Quaternion_T&& rhs) noexcept;
+		constexpr Quaternion_T(T x, T y, T z, T w) noexcept
+			: quat_(x, y, z, w)
+		{
+		}
 
-		static Quaternion_T const & Identity() KLAYGE_NOEXCEPT;
+		static size_t size() noexcept
+		{
+			return elem_num;
+		}
+
+		static Quaternion_T const & Identity() noexcept;
 
 		// 取向量
-		iterator begin() KLAYGE_NOEXCEPT
+		iterator begin() noexcept
 		{
 			return quat_.begin();
 		}
-		const_iterator begin() const KLAYGE_NOEXCEPT
+		constexpr const_iterator begin() const noexcept
 		{
 			return quat_.begin();
 		}
-		iterator end() KLAYGE_NOEXCEPT
+		iterator end() noexcept
 		{
 			return quat_.end();
 		}
-		const_iterator end() const KLAYGE_NOEXCEPT
+		constexpr const_iterator end() const noexcept
 		{
 			return quat_.end();
 		}
-		reference operator[](size_t index) KLAYGE_NOEXCEPT
+		reference operator[](size_t index) noexcept
 		{
 			return quat_[index];
 		}
-		const_reference operator[](size_t index) const KLAYGE_NOEXCEPT
+		constexpr const_reference operator[](size_t index) const noexcept
 		{
 			return quat_[index];
 		}
 
-		reference x() KLAYGE_NOEXCEPT
+		reference x() noexcept
 		{
 			return quat_[0];
 		}
-		const_reference x() const KLAYGE_NOEXCEPT
+		constexpr const_reference x() const noexcept
 		{
 			return quat_[0];
 		}
-		reference y() KLAYGE_NOEXCEPT
+		reference y() noexcept
 		{
 			return quat_[1];
 		}
-		const_reference y() const KLAYGE_NOEXCEPT
+		constexpr const_reference y() const noexcept
 		{
 			return quat_[1];
 		}
-		reference z() KLAYGE_NOEXCEPT
+		reference z() noexcept
 		{
 			return quat_[2];
 		}
-		const_reference z() const KLAYGE_NOEXCEPT
+		constexpr const_reference z() const noexcept
 		{
 			return quat_[2];
 		}
-		reference w() KLAYGE_NOEXCEPT
+		reference w() noexcept
 		{
 			return quat_[3];
 		}
-		const_reference w() const KLAYGE_NOEXCEPT
+		constexpr const_reference w() const noexcept
 		{
 			return quat_[3];
 		}
 
 		// 赋值操作符
-		Quaternion_T const & operator+=(Quaternion_T const & rhs) KLAYGE_NOEXCEPT;
-		Quaternion_T const & operator-=(Quaternion_T const & rhs) KLAYGE_NOEXCEPT;
+		Quaternion_T const & operator+=(Quaternion_T const & rhs) noexcept;
+		Quaternion_T const & operator-=(Quaternion_T const & rhs) noexcept;
 
-		Quaternion_T const & operator*=(Quaternion_T const & rhs) KLAYGE_NOEXCEPT;
-		Quaternion_T const & operator*=(T rhs) KLAYGE_NOEXCEPT;
-		Quaternion_T const & operator/=(T rhs) KLAYGE_NOEXCEPT;
+		Quaternion_T const & operator*=(Quaternion_T const & rhs) noexcept;
+		Quaternion_T const & operator*=(T rhs) noexcept;
+		Quaternion_T const & operator/=(T rhs) noexcept;
 
-		Quaternion_T& operator=(Quaternion_T const & rhs) KLAYGE_NOEXCEPT;
-		Quaternion_T& operator=(Quaternion_T&& rhs) KLAYGE_NOEXCEPT;
+		Quaternion_T& operator=(Quaternion_T const & rhs) noexcept;
+		Quaternion_T& operator=(Quaternion_T&& rhs) noexcept;
 
 		// 一元操作符
-		Quaternion_T const operator+() const KLAYGE_NOEXCEPT;
-		Quaternion_T const operator-() const KLAYGE_NOEXCEPT;
+		Quaternion_T const operator+() const noexcept;
+		Quaternion_T const operator-() const noexcept;
 
 		// 取方向向量
-		Vector_T<T, 3> const v() const KLAYGE_NOEXCEPT;
-		void v(Vector_T<T, 3> const & rhs) KLAYGE_NOEXCEPT;
+		Vector_T<T, 3> const v() const noexcept;
+		void v(Vector_T<T, 3> const & rhs) noexcept;
 
-		bool operator==(Quaternion_T<T> const & rhs) const KLAYGE_NOEXCEPT;
+		bool operator==(Quaternion_T<T> const & rhs) const noexcept;
 
 	private:
 		Vector_T<T, elem_num> quat_;

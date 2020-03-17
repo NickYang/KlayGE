@@ -74,8 +74,6 @@ namespace KlayGE
 		{
 			char_width_.resize(buffer_.size() + 1);
 
-			UISize size;
-
 			for (size_t i = 0; i < char_width_.size(); ++ i)
 			{
 				std::wstring str = buffer_.substr(0, i);
@@ -170,45 +168,16 @@ namespace KlayGE
 	Timer UIEditBox::timer_;
 
 	UIEditBox::UIEditBox(UIDialogPtr const & dialog)
-					: UIControl(UIEditBox::Type, dialog),
-						border_(5),	// Default border width
-						spacing_(4),	// Default spacing
-#ifdef KLAYGE_PLATFORM_WINDOWS
-#ifdef KLAYGE_PLATFORM_WINDOWS_DESKTOP
-						blink_time_(GetCaretBlinkTime() * 0.001f),
-#else
-						blink_time_(1),
-#endif
-#else
-						blink_time_(1),
-#endif
-						last_blink_time_(timer_.current_time()),
-						caret_on_(true),
-						caret_pos_(0),
-						insert_mode_(true),
-						sel_start_(0),
-						first_visible_(0),
-						text_color_(16.0f / 255, 16.0f / 255, 16.0f / 255, 1),
-						sel_text_color_(1, 1, 1, 1),
-						sel_bk_color_(40.0f / 255, 50.0f / 255, 92.0f / 255, 1),
-						caret_color_(0, 0, 0, 1),
-						mouse_drag_(false)
+					: UIEditBox(UIEditBox::Type, dialog)
 	{
-		hide_caret_ = false;
-
-		this->InitDefaultElements();
 	}
 
 	UIEditBox::UIEditBox(uint32_t type, UIDialogPtr const & dialog)
 					: UIControl(type, dialog),
 						border_(5),	// Default border width
 						spacing_(4),	// Default spacing
-#ifdef KLAYGE_PLATFORM_WINDOWS
 #ifdef KLAYGE_PLATFORM_WINDOWS_DESKTOP
 						blink_time_(GetCaretBlinkTime() * 0.001f),
-#else
-						blink_time_(1),
-#endif
 #else
 						blink_time_(1),
 #endif
@@ -226,49 +195,7 @@ namespace KlayGE
 	{
 		hide_caret_ = false;
 
-		this->InitDefaultElements();
-	}
 
-	UIEditBox::UIEditBox(UIDialogPtr const & dialog, int ID, std::wstring const & strText, int4 const & coord_size, bool bIsDefault)
-					: UIControl(UIEditBox::Type, dialog),
-						border_(5),	// Default border width
-						spacing_(4),	// Default spacing
-#ifdef KLAYGE_PLATFORM_WINDOWS
-#ifdef KLAYGE_PLATFORM_WINDOWS_DESKTOP
-						blink_time_(GetCaretBlinkTime() * 0.001f),
-#else
-						blink_time_(1),
-#endif
-#else
-						blink_time_(1),
-#endif
-						last_blink_time_(timer_.current_time()),
-						caret_on_(true),
-						caret_pos_(0),
-						insert_mode_(true),
-						sel_start_(0),
-						first_visible_(0),
-						text_color_(16.0f / 255, 16.0f / 255, 16.0f / 255, 1),
-						sel_text_color_(1, 1, 1, 1),
-						sel_bk_color_(40.0f / 255, 50.0f / 255, 92.0f / 255, 1),
-						caret_color_(0, 0, 0, 1),
-						mouse_drag_(false)
-	{
-		hide_caret_ = false;
-
-		this->InitDefaultElements();
-
-		// Set the ID and position
-		this->SetID(ID);
-		this->SetLocation(coord_size.x(), coord_size.y());
-		this->SetSize(coord_size.z(), coord_size.w());
-		this->SetIsDefault(bIsDefault);
-
-		this->SetText(strText);
-	}
-
-	void UIEditBox::InitDefaultElements()
-	{
 		UIElement Element;
 
 		// Element assignment:
@@ -288,65 +215,80 @@ namespace KlayGE
 		{
 			Element.SetTexture(0, UIManager::Instance().ElementTextureRect(UICT_EditBox, 0));
 
-			elements_.push_back(MakeSharedPtr<UIElement>(Element));
+			elements_.push_back(MakeUniquePtr<UIElement>(Element));
 		}
 
 		{
 			Element.SetTexture(0, UIManager::Instance().ElementTextureRect(UICT_EditBox, 1));
 
-			elements_.push_back(MakeSharedPtr<UIElement>(Element));
+			elements_.push_back(MakeUniquePtr<UIElement>(Element));
 		}
 
 		{
 			Element.SetTexture(0, UIManager::Instance().ElementTextureRect(UICT_EditBox, 2));
 
-			elements_.push_back(MakeSharedPtr<UIElement>(Element));
+			elements_.push_back(MakeUniquePtr<UIElement>(Element));
 		}
 
 		{
 			Element.SetTexture(0, UIManager::Instance().ElementTextureRect(UICT_EditBox, 3));
 
-			elements_.push_back(MakeSharedPtr<UIElement>(Element));
+			elements_.push_back(MakeUniquePtr<UIElement>(Element));
 		}
 
 		{
 			Element.SetTexture(0, UIManager::Instance().ElementTextureRect(UICT_EditBox, 4));
 
-			elements_.push_back(MakeSharedPtr<UIElement>(Element));
+			elements_.push_back(MakeUniquePtr<UIElement>(Element));
 		}
 
 		{
 			Element.SetTexture(0, UIManager::Instance().ElementTextureRect(UICT_EditBox, 5));
 
-			elements_.push_back(MakeSharedPtr<UIElement>(Element));
+			elements_.push_back(MakeUniquePtr<UIElement>(Element));
 		}
 
 		{
 			Element.SetTexture(0, UIManager::Instance().ElementTextureRect(UICT_EditBox, 6));
 
-			elements_.push_back(MakeSharedPtr<UIElement>(Element));
+			elements_.push_back(MakeUniquePtr<UIElement>(Element));
 		}
 
 		{
 			Element.SetTexture(0, UIManager::Instance().ElementTextureRect(UICT_EditBox, 7));
 
-			elements_.push_back(MakeSharedPtr<UIElement>(Element));
+			elements_.push_back(MakeUniquePtr<UIElement>(Element));
 		}
 
 		{
 			Element.SetTexture(0, UIManager::Instance().ElementTextureRect(UICT_EditBox, 8));
 
-			elements_.push_back(MakeSharedPtr<UIElement>(Element));
+			elements_.push_back(MakeUniquePtr<UIElement>(Element));
 		}
 
 		WindowPtr const & main_wnd = Context::Instance().AppInstance().MainWnd();
-		on_char_connect_ = main_wnd->OnChar().connect(bind(&UIEditBox::CharHandler, this,
-			std::placeholders::_1, std::placeholders::_2));
+		on_char_connect_ = main_wnd->OnChar().Connect(
+			[this](Window const & win, wchar_t ch)
+			{
+				this->CharHandler(win, ch);
+			});
+	}
+
+	UIEditBox::UIEditBox(UIDialogPtr const & dialog, int ID, std::wstring const & strText, int4 const & coord_size, bool bIsDefault)
+					: UIEditBox(dialog)
+	{
+		// Set the ID and position
+		this->SetID(ID);
+		this->SetLocation(coord_size.x(), coord_size.y());
+		this->SetSize(coord_size.z(), coord_size.w());
+		this->SetIsDefault(bIsDefault);
+
+		this->SetText(strText);
 	}
 
 	UIEditBox::~UIEditBox()
 	{
-		on_char_connect_.disconnect();
+		on_char_connect_.Disconnect();
 	}
 
 	// PlaceCaret: Set the caret to a character position, and adjust the scrolling if
@@ -627,6 +569,16 @@ namespace KlayGE
 	void UIEditBox::CharHandler(Window const & /*win*/, wchar_t ch)
 	{
 #ifdef KLAYGE_PLATFORM_WINDOWS
+#ifndef VK_CANCEL
+#define VK_CANCEL 0x03
+#endif
+#ifndef VK_BACK
+#define VK_BACK 0x08
+#endif
+#ifndef VK_RETURN
+#define VK_RETURN 0x0D
+#endif
+
 		if (has_focus_)
 		{
 			switch (ch)
@@ -797,10 +749,11 @@ namespace KlayGE
 
 	void UIEditBox::Render()
 	{
-		UIElementPtr pElement = this->GetElement(0);
-		if (pElement)
+		auto text_element = elements_[0].get();
+		if (text_element)
 		{
-			buffer_.SetFont(this->GetDialog()->GetFont(pElement->FontIndex()), this->GetDialog()->GetFontSize(pElement->FontIndex()));
+			buffer_.SetFont(this->GetDialog()->GetFont(text_element->FontIndex()),
+				this->GetDialog()->GetFontSize(text_element->FontIndex()));
 			this->PlaceCaret(caret_pos_);  // Call PlaceCaret now that we have the font info (node),
 			// so that scrolling can be handled.
 		}
@@ -808,17 +761,17 @@ namespace KlayGE
 		// Render the control graphics
 		for (int i = 0; i < 9; ++ i)
 		{
-			pElement = elements_[i];
+			auto& element = *elements_[i];
 			if (this->GetEnabled())
 			{
-				pElement->TextureColor().SetState(UICS_Normal);
+				element.TextureColor().SetState(UICS_Normal);
 			}
 			else
 			{
-				pElement->TextureColor().SetState(UICS_Disabled);
+				element.TextureColor().SetState(UICS_Disabled);
 			}
 
-			this->GetDialog()->DrawSprite(*pElement, render_rc_[i]);
+			this->GetDialog()->DrawSprite(element, render_rc_[i]);
 		}
 
 		//

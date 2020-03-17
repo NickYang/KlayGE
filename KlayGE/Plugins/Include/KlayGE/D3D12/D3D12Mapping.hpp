@@ -34,6 +34,7 @@
 #pragma once
 
 #include <KlayGE/PreDeclare.hpp>
+#include <KFL/CXX2a/span.hpp>
 #include <KlayGE/RenderEngine.hpp>
 #include <KlayGE/RenderStateObject.hpp>
 #include <KlayGE/RenderLayout.hpp>
@@ -61,9 +62,10 @@ namespace KlayGE
 
 		static D3D12_PRIMITIVE_TOPOLOGY Mapping(RenderLayout::topology_type tt);
 		static D3D12_PRIMITIVE_TOPOLOGY_TYPE MappingPriTopoType(RenderLayout::topology_type tt);
-		static void Mapping(std::vector<D3D12_INPUT_ELEMENT_DESC>& elements, size_t stream, vertex_elements_type const & vet, RenderLayout::stream_type type, uint32_t freq);
+		static void Mapping(std::vector<D3D12_INPUT_ELEMENT_DESC>& elements, size_t stream, std::span<VertexElement const> vet,
+			RenderLayout::stream_type type, uint32_t freq);
 
-		static D3D12_SO_DECLARATION_ENTRY Mapping(ShaderDesc::StreamOutputDecl const & decl, uint8_t slot);
+		static D3D12_SO_DECLARATION_ENTRY Mapping(ShaderDesc::StreamOutputDecl const & decl);
 
 		static DXGI_FORMAT MappingFormat(ElementFormat pf);
 		static ElementFormat MappingFormat(DXGI_FORMAT d3dfmt);

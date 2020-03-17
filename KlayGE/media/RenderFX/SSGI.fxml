@@ -22,7 +22,6 @@
 	<cbuffer name="per_frame">
 		<parameter type="float4x4" name="proj"/>
 		<parameter type="float4x4" name="inv_proj"/>
-		<parameter type="float2" name="far_plane"/>
 	</cbuffer>
 
 	<parameter type="float" name="min_threshold" value="6.10352e-5"/>
@@ -39,7 +38,7 @@
 		<state name="address_v" value="clamp"/>
 	</parameter>
 
-	<parameter type="texture2D" name="g_buffer_tex"/>
+	<parameter type="texture2D" name="g_buffer_rt0_tex"/>
 	<parameter type="texture2D" name="depth_tex"/>
 	<parameter type="texture2D" name="shading_tex"/>
 
@@ -80,10 +79,10 @@ float3 CalcAlchemyObscurance(float2 tc, float3 pos_es, float3 x_dir, float3 y_di
 			float4 sample_point_ss = mul(float4(sample_point, 1), proj);
 
 			float2 tc_sample = TexCoordFromPos(sample_point_ss / sample_point_ss.w);
-			float depth_sample = ReadAFloat(depth_tex.SampleGrad(point_sampler, tc_sample, grad_x, grad_y), far_plane.x);
+			float depth_sample = depth_tex.SampleGrad(point_sampler, tc_sample, grad_x, grad_y).x;
 			float3 pos_es_sample = sample_point * (depth_sample / sample_point.z);
 			float3 dir_es_sample = pos_es_sample - pos_es;
-			float3 normal_sample = GetNormal(g_buffer_tex.SampleGrad(point_sampler, tc_sample, grad_x, grad_y));
+			float3 normal_sample = GetNormal(g_buffer_rt0_tex.SampleGrad(point_sampler, tc_sample, grad_x, grad_y));
 			
 			if (dot(normal_sample, normal) < 1e-3f)
 			{
@@ -92,7 +91,7 @@ float3 CalcAlchemyObscurance(float2 tc, float3 pos_es, float3 x_dir, float3 y_di
 				{
 					total_weight += 1.0f;
 				
-					float atten = attenuation_term(pos_es_sample, pos_es, float3(1, 0.5f, 0));
+					float atten = AttenuationTerm(pos_es_sample, pos_es, float3(1, 0.5f, 0));
 					indirect += atten * dot(normalize(dir_es_sample), normal) * shading_tex.SampleLevel(bilinear_sampler, tc_sample, 0).xyz;
 				}
 			}
@@ -120,8 +119,8 @@ float4 SSGIPS(float2 tc : TEXCOORD0, float3 view_dir : TEXCOORD1) : SV_Target
 {
 	float radius = 4;
 
-	float depth = ReadAFloat(depth_tex.Sample(point_sampler, tc), far_plane.x);
-	float3 normal = GetNormal(g_buffer_tex.Sample(point_sampler, tc));
+	float depth = depth_tex.Sample(point_sampler, tc).x;
+	float3 normal = GetNormal(g_buffer_rt0_tex.Sample(point_sampler, tc));
 
 	view_dir = normalize(view_dir);
 	float3 pos_es = view_dir * (depth / view_dir.z);

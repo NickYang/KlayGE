@@ -20,9 +20,7 @@
 namespace KlayGE
 {
 	UISlider::UISlider(UIDialogPtr const & dialog)
-					: UIControl(UISlider::Type, dialog),
-						value_(50), min_(0), max_(100),
-						pressed_(false)
+					: UISlider(UISlider::Type, dialog)
 	{
 	}
 
@@ -30,27 +28,6 @@ namespace KlayGE
 					: UIControl(type, dialog),
 						value_(50), min_(0), max_(100),
 						pressed_(false)
-	{
-		this->InitDefaultElements();
-	}
-
-	UISlider::UISlider(UIDialogPtr const & dialog, int ID, int4 const & coord_size, int min, int max, int value, bool bIsDefault)
-					: UIControl(UISlider::Type, dialog),
-						value_(value), min_(min), max_(max),
-						pressed_(false)
-	{
-		this->InitDefaultElements();
-
-		// Set the ID and list index
-		this->SetID(ID);
-		this->SetLocation(coord_size.x(), coord_size.y());
-		this->SetSize(coord_size.z(), coord_size.w());
-		this->SetIsDefault(bIsDefault);
-
-		this->UpdateRects();
-	}
-
-	void UISlider::InitDefaultElements()
 	{
 		UIElement Element;
 
@@ -61,15 +38,31 @@ namespace KlayGE
 			Element.TextureColor().States[UICS_Focus] = Color(1, 1, 1, 200.0f / 255);
 			Element.TextureColor().States[UICS_Disabled] = Color(1, 1, 1, 70.0f / 255);
 
-			elements_.push_back(MakeSharedPtr<UIElement>(Element));
+			elements_.push_back(MakeUniquePtr<UIElement>(Element));
 		}
 
 		// Button
 		{
 			Element.SetTexture(0, UIManager::Instance().ElementTextureRect(UICT_Slider, 1));
 
-			elements_.push_back(MakeSharedPtr<UIElement>(Element));
+			elements_.push_back(MakeUniquePtr<UIElement>(Element));
 		}
+	}
+
+	UISlider::UISlider(UIDialogPtr const & dialog, int ID, int4 const & coord_size, int min, int max, int value, bool bIsDefault)
+					: UISlider(dialog)
+	{
+		value_ = value;
+		min_ = min;
+		max_ = max;
+
+		// Set the ID and list index
+		this->SetID(ID);
+		this->SetLocation(coord_size.x(), coord_size.y());
+		this->SetSize(coord_size.z(), coord_size.w());
+		this->SetIsDefault(bIsDefault);
+
+		this->UpdateRects();
 	}
 
 	void UISlider::KeyDownHandler(UIDialog const & /*sender*/, uint32_t key)
@@ -251,14 +244,14 @@ namespace KlayGE
 			iState = UICS_Hidden;
 		}
 
-		UIElementPtr pElement = elements_[0];
+		auto& track_element = *elements_[0];
 
-		pElement->TextureColor().SetState(iState);
-		this->GetDialog()->DrawSprite(*pElement, slider_rc_);
+		track_element.TextureColor().SetState(iState);
+		this->GetDialog()->DrawSprite(track_element, slider_rc_);
 
-		pElement = elements_[1];
+		auto& button_element = *elements_[1];
 
-		pElement->TextureColor().SetState(iState);
-		this->GetDialog()->DrawSprite(*pElement, button_rc_);
+		button_element.TextureColor().SetState(iState);
+		this->GetDialog()->DrawSprite(button_element, button_rc_);
 	}
 }

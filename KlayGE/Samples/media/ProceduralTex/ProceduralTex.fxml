@@ -4,11 +4,10 @@
 	<include name="Lighting.fxml"/>
 	<include name="Noise.fxml"/>
 	<include name="Quaternion.fxml"/>
+	<include name="Mesh.fxml"/>
 
 	<cbuffer name="per_frame">
 		<parameter type="float4x4" name="mvp" semantic="WORLDVIEWPROJECTION"/>
-		<parameter type="float3" name="pos_center"/>
-		<parameter type="float3" name="pos_extent"/>
 		<parameter type="float3" name="eye_pos"/>
 		<parameter type="float3" name="light_pos"/>
 		<parameter type="float3" name="light_color"/>
@@ -83,11 +82,11 @@ float4 WoodPS(float3 pos_os : TEXCOORD0,
 	float3 bump = simplex_noise_gradient(tex_coord * 100, 0.1f);
 	float3 normal = normalize(normal_os + bump * 0.05f);
 
-	float atten = attenuation_term(light_pos, pos_os, light_falloff);
+	float atten = AttenuationTerm(light_pos, pos_os, light_falloff);
 	
 	float3 clr = wood(tex_coord).xyz;
 
-	return float4(clr * 0.05f + atten * light_color * calc_brdf(clr, 0.1f, 32, light_os, halfway_os, normal), 1);
+	return float4(clr * 0.05f + atten * light_color * CalcBRDFShading(clr, 0.1f, 32, light_os, halfway_os, normal), 1);
 }
 
 float4 MarblePS(float3 pos_os : TEXCOORD0,
@@ -100,11 +99,11 @@ float4 MarblePS(float3 pos_os : TEXCOORD0,
 	
 	normal_os = normalize(normal_os);
 
-	float atten = attenuation_term(light_pos, pos_os, light_falloff);
+	float atten = AttenuationTerm(light_pos, pos_os, light_falloff);
 
 	float3 clr = max(0.0f, marble(tex_coord).xyz);
 
-	return float4(clr * 0.05f + atten * light_color * calc_brdf(clr, 0.4f, 16, light_os, halfway_os, normal_os), 1);
+	return float4(clr * 0.05f + atten * light_color * CalcBRDFShading(clr, 0.4f, 16, light_os, halfway_os, normal_os), 1);
 }
 
 float4 CloudPS(float3 pos_os : TEXCOORD0,
@@ -153,7 +152,7 @@ float4 ElectroPS(float3 pos_os : TEXCOORD0,
 			<state name="pixel_shader" value="CloudPS()"/>
 		</pass>
 	</technique>
-	<technique name="ProceduralCloudElectroTex">
+	<technique name="ProceduralElectroTex">
 		<pass name="p0">
 			<state name="vertex_shader" value="ProceduralTexVS()"/>
 			<state name="pixel_shader" value="ElectroPS()"/>

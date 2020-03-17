@@ -22,7 +22,7 @@ namespace KlayGE
 	//////////////////////////////////////////////////////////////////////////////////
 	void InputActionMap::AddAction(InputActionDefine const & action_define)
 	{
-		actionMap_.emplace(action_define.second, action_define.first);
+		actionMap_.emplace(action_define.semantic, action_define.action);
 	}
 
 	// 更新输入动作
@@ -31,7 +31,7 @@ namespace KlayGE
 	{
 		if (this->HasAction(key))
 		{
-			actions.push_back(std::make_pair(this->Action(key), param));
+			actions.emplace_back(this->Action(key), param);
 		}
 	}
 

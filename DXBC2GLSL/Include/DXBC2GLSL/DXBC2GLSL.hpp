@@ -52,10 +52,10 @@ namespace DXBC2GLSL
 		static uint32_t DefaultRules(GLSLVersion version);
 
 		void FeedDXBC(void const * dxbc_data,
-			bool has_gs, ShaderTessellatorPartitioning ds_partitioning, ShaderTessellatorOutputPrimitive ds_output_primitive,
+			bool has_gs, bool has_ps, ShaderTessellatorPartitioning ds_partitioning, ShaderTessellatorOutputPrimitive ds_output_primitive,
 			GLSLVersion version);
 		void FeedDXBC(void const * dxbc_data,
-			bool has_gs, ShaderTessellatorPartitioning ds_partitioning, ShaderTessellatorOutputPrimitive ds_output_primitive,
+			bool has_gs, bool has_ps, ShaderTessellatorPartitioning ds_partitioning, ShaderTessellatorOutputPrimitive ds_output_primitive,
 			GLSLVersion version, uint32_t glsl_rules);
 
 		std::string const & GLSLString() const;
@@ -75,6 +75,7 @@ namespace DXBC2GLSL
 		char const * ResourceName(uint32_t index) const;
 		uint32_t ResourceBindPoint(uint32_t index) const;
 		ShaderInputType ResourceType(uint32_t index) const;
+		ShaderSRVDimension ResourceDimension(uint32_t index) const;
 		bool ResourceUsed(uint32_t index) const;
 
 		ShaderPrimitive GSInputPrimitive() const;

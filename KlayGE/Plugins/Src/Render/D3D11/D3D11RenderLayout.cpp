@@ -12,8 +12,7 @@
 
 #include <KlayGE/KlayGE.hpp>
 #include <KFL/Util.hpp>
-#include <KFL/COMPtr.hpp>
-#include <KFL/ThrowErr.hpp>
+#include <KFL/ErrorHandling.hpp>
 #include <KFL/Math.hpp>
 #include <KlayGE/RenderEngine.hpp>
 #include <KlayGE/RenderFactory.hpp>
@@ -26,6 +25,7 @@
 #include <KlayGE/D3D11/D3D11Mapping.hpp>
 #include <KlayGE/D3D11/D3D11GraphicsBuffer.hpp>
 #include <KlayGE/D3D11/D3D11RenderLayout.hpp>
+#include <KlayGE/D3D11/D3D11ShaderObject.hpp>
 
 namespace KlayGE
 {
@@ -33,36 +33,77 @@ namespace KlayGE
 	{
 	}
 
-	ID3D11InputLayout* D3D11RenderLayout::InputLayout(size_t signature, std::vector<uint8_t> const & vs_code) const
+	void D3D11RenderLayout::Active() const
 	{
-		for (size_t i = 0; i < input_layouts_.size(); ++ i)
+		if (streams_dirty_)
 		{
-			if (input_layouts_[i].first == signature)
+			uint32_t const num_vertex_streams = this->NumVertexStreams();
+			uint32_t const all_num_vertex_stream = num_vertex_streams + (this->InstanceStream() ? 1 : 0);
+
+			vertex_elems_.clear();
+			vertex_elems_.reserve(all_num_vertex_stream);
+
+			vbs_.resize(all_num_vertex_stream);
+			strides_.resize(all_num_vertex_stream);
+			offsets_.resize(all_num_vertex_stream);
+			for (uint32_t i = 0; i < num_vertex_streams; ++ i)
 			{
-				return input_layouts_[i].second.get();
+				std::vector<D3D11_INPUT_ELEMENT_DESC> stream_elems;
+				D3D11Mapping::Mapping(stream_elems, i, this->VertexStreamFormat(i), vertex_streams_[i].type, vertex_streams_[i].freq);
+				vertex_elems_.insert(vertex_elems_.end(), stream_elems.begin(), stream_elems.end());
+
+				D3D11GraphicsBuffer const& d3dvb = checked_cast<D3D11GraphicsBuffer const&>(*this->GetVertexStream(i));
+				vbs_[i] = d3dvb.D3DBuffer();
+				strides_[i] = this->VertexSize(i);
+				offsets_[i] = 0;
 			}
+			if (this->InstanceStream())
+			{
+				std::vector<D3D11_INPUT_ELEMENT_DESC> stream_elems;
+				D3D11Mapping::Mapping(stream_elems, this->NumVertexStreams(), this->InstanceStreamFormat(),
+					instance_stream_.type, instance_stream_.freq);
+				vertex_elems_.insert(vertex_elems_.end(), stream_elems.begin(), stream_elems.end());
+
+				uint32_t const number = num_vertex_streams;
+
+				D3D11GraphicsBuffer const& d3dvb = checked_cast<D3D11GraphicsBuffer const&>(*this->InstanceStream());
+				vbs_[number] = d3dvb.D3DBuffer();
+				strides_[number] = this->InstanceSize();
+				offsets_[number] = 0;
+			}
+
+			streams_dirty_ = false;
 		}
+	}
 
-		std::vector<D3D11_INPUT_ELEMENT_DESC> elems;
-		elems.reserve(vertex_streams_.size());
-
-		for (uint32_t i = 0; i < this->NumVertexStreams(); ++ i)
+	ID3D11InputLayout* D3D11RenderLayout::InputLayout(ShaderObject const * so) const
+	{
+		if (!vertex_elems_.empty())
 		{
-			std::vector<D3D11_INPUT_ELEMENT_DESC> stream_elems;
-			D3D11Mapping::Mapping(stream_elems, i, this->VertexStreamFormat(i), vertex_streams_[i].type, vertex_streams_[i].freq);
-			elems.insert(elems.end(), stream_elems.begin(), stream_elems.end());
+			D3D11ShaderObject const& shader = checked_cast<D3D11ShaderObject const&>(*so);
+			auto const signature = shader.VsSignature();
+
+			for (auto const & il : input_layouts_)
+			{
+				if (il.first == signature)
+				{
+					return il.second.get();
+				}
+			}
+
+			auto vs_code = shader.VsCode();
+			auto& re = checked_cast<D3D11RenderEngine&>(Context::Instance().RenderFactoryInstance().RenderEngineInstance());
+			ID3D11Device1* d3d_device = re.D3DDevice1();
+			ID3D11InputLayoutPtr new_layout;
+			TIFHR(d3d_device->CreateInputLayout(&vertex_elems_[0], static_cast<UINT>(vertex_elems_.size()),
+				vs_code.data(), vs_code.size(), new_layout.put()));
+			auto* new_layout_raw = new_layout.get();
+			input_layouts_.emplace_back(signature, std::move(new_layout)); // The emplace_back in VS2015 doesn't have a return value
+			return new_layout_raw;
 		}
-		if (instance_stream_.stream)
+		else
 		{
-			std::vector<D3D11_INPUT_ELEMENT_DESC> stream_elems;
-			D3D11Mapping::Mapping(stream_elems, this->NumVertexStreams(), this->InstanceStreamFormat(), instance_stream_.type, instance_stream_.freq);
-			elems.insert(elems.end(), stream_elems.begin(), stream_elems.end());
+			return nullptr;
 		}
-
-		D3D11RenderEngine& re = *checked_cast<D3D11RenderEngine*>(&Context::Instance().RenderFactoryInstance().RenderEngineInstance());
-		ID3D11InputLayoutPtr const & ret = re.CreateD3D11InputLayout(elems, signature, vs_code);
-		input_layouts_.push_back(std::make_pair(signature, ret));
-
-		return input_layouts_.back().second.get();
 	}
 }

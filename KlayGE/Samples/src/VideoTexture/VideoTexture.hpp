@@ -10,8 +10,6 @@ class VideoTextureApp : public KlayGE::App3DFramework
 public:
 	VideoTextureApp();
 
-	bool ConfirmDevice() const;
-
 private:
 	void OnCreate();
 	void OnResize(KlayGE::uint32_t width, KlayGE::uint32_t height);
@@ -23,14 +21,12 @@ private:
 
 	KlayGE::FontPtr font_;
 
-	KlayGE::SceneObjectPtr ground_;
+	KlayGE::SceneNodePtr object_;
+	KlayGE::RenderModelPtr model_;
 
 	KlayGE::TrackballCameraController tb_controller_;
 
-	KlayGE::SceneObjectPtr light_proxy_;
 	KlayGE::LightSourcePtr light_;
-
-	KlayGE::ShowEnginePtr show_eng_;
 };
 
 #endif		// _VIDEOTEXTURE_HPP

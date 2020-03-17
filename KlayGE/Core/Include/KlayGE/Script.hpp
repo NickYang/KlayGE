@@ -28,77 +28,32 @@
  * from http://www.klayge.org/licensing/.
  */
 
-#ifndef _SCRIPT_HPP
-#define _SCRIPT_HPP
+#ifndef KLAYGE_CORE_SCRIPT_HPP
+#define KLAYGE_CORE_SCRIPT_HPP
 
 #pragma once
 
-#include <vector>
 #include <string>
 
-#include <boost/noncopyable.hpp>
-#ifdef KLAYGE_TS_LIBRARY_ANY_SUPPORT
-	#include <experimental/any>
-#else
-	#include <boost/any.hpp>
-	namespace std
-	{
-		namespace experimental
-		{
-			using boost::any;
-			using boost::any_cast;
-			using boost::bad_any_cast;
-		}
-	}
-#endif
+#include <KFL/CXX17/any.hpp>
+#include <KFL/CXX2a/span.hpp>
 
 namespace KlayGE
 {
-	typedef std::vector<std::experimental::any> AnyDataListType;
-
-	class KLAYGE_CORE_API ScriptModule
+	class KLAYGE_CORE_API ScriptModule : boost::noncopyable
 	{
-	private:
-		template <typename tuple_type, int N>
-		struct Tuple2Vector
-		{
-			static AnyDataListType Do(tuple_type const & t)
-			{
-				AnyDataListType ret = Tuple2Vector<tuple_type, N - 1>::Do(t);
-				ret.push_back(std::get<N - 1>(t));
-				return ret;
-			}
-		};
-
-		template <typename tuple_type>
-		struct Tuple2Vector<tuple_type, 1>
-		{
-			static AnyDataListType Do(tuple_type const & t)
-			{
-				return AnyDataListType(1, std::get<0>(t));
-			}
-		};
-
 	public:
 		ScriptModule();
 		virtual ~ScriptModule();
 
-		template <typename TupleType>
-		std::experimental::any Call(std::string const & func_name, TupleType const & t)
-		{
-			AnyDataListType v(Tuple2Vector<TupleType, std::tuple_size<TupleType>::value>::Do(t));
-			return Call(func_name, v);
-		}
-
-		virtual std::experimental::any Value(std::string const & name);
-		virtual std::experimental::any Call(std::string const & func_name, const AnyDataListType& args);
-		virtual std::experimental::any RunString(std::string const & script);
+		virtual std::any Value(std::string const & name) = 0;
+		virtual std::any Call(std::string const & func_name, std::span<std::any const> args) = 0;
+		virtual std::any RunString(std::string const & script) = 0;
 	};
 
 	typedef std::shared_ptr<ScriptModule> ScriptModulePtr;
 
-	// 实现脚本引擎的功能
-	/////////////////////////////////////////////////////////////////////////////////
+
 	class KLAYGE_CORE_API ScriptEngine : boost::noncopyable
 	{
 	public:
@@ -108,10 +63,7 @@ namespace KlayGE
 		void Suspend();
 		void Resume();
 
-		static ScriptEnginePtr NullObject();
-
-		// 创建一个新的脚本模块
-		virtual ScriptModulePtr CreateModule(std::string const & name);
+		virtual ScriptModulePtr CreateModule(std::string const & name) = 0;
 
 	private:
 		virtual void DoSuspend() = 0;
@@ -119,4 +71,4 @@ namespace KlayGE
 	};
 }
 
-#endif		// _SCRIPT_HPP
+#endif		// KLAYGE_CORE_SCRIPT_HPP

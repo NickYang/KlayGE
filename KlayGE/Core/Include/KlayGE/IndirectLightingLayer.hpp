@@ -39,7 +39,7 @@
 
 namespace KlayGE
 {
-	class KLAYGE_CORE_API IndirectLightingLayer
+	class KLAYGE_CORE_API IndirectLightingLayer : boost::noncopyable
 	{
 	public:
 		virtual ~IndirectLightingLayer()
@@ -49,9 +49,13 @@ namespace KlayGE
 		virtual void GBuffer(TexturePtr const & rt0_tex, TexturePtr const & rt1_tex, TexturePtr const & depth_tex) = 0;
 		virtual void RSM(TexturePtr const & rt0_tex, TexturePtr const & rt1_tex, TexturePtr const & depth_tex) = 0;
 
-		TexturePtr IndirectLightingTex() const
+		TexturePtr const& IndirectLightingTex() const
 		{
 			return indirect_lighting_tex_;
+		}
+		ShaderResourceViewPtr const& IndirectLightingSrv() const
+		{
+			return indirect_lighting_srv_;
 		}
 
 		virtual void UpdateGBuffer(Camera const & vp_camera) = 0;
@@ -60,6 +64,7 @@ namespace KlayGE
 
 	protected:
 		TexturePtr indirect_lighting_tex_;
+		ShaderResourceViewPtr indirect_lighting_srv_;
 	};
 
 	class KLAYGE_CORE_API MultiResSILLayer : public IndirectLightingLayer
@@ -67,12 +72,12 @@ namespace KlayGE
 	public:
 		MultiResSILLayer();
 
-		virtual void GBuffer(TexturePtr const & rt0_tex, TexturePtr const & rt1_tex, TexturePtr const & depth_tex) KLAYGE_OVERRIDE;
-		virtual void RSM(TexturePtr const & rt0_tex, TexturePtr const & rt1_tex, TexturePtr const & depth_tex) KLAYGE_OVERRIDE;
+		virtual void GBuffer(TexturePtr const & rt0_tex, TexturePtr const & rt1_tex, TexturePtr const & depth_tex) override;
+		virtual void RSM(TexturePtr const & rt0_tex, TexturePtr const & rt1_tex, TexturePtr const & depth_tex) override;
 
-		virtual void UpdateGBuffer(Camera const & vp_camera) KLAYGE_OVERRIDE;
-		virtual void UpdateRSM(Camera const & rsm_camera, LightSource const & light) KLAYGE_OVERRIDE;
-		virtual void CalcIndirectLighting(TexturePtr const & prev_shading_tex, float4x4 const & proj_to_prev) KLAYGE_OVERRIDE;
+		virtual void UpdateGBuffer(Camera const & vp_camera) override;
+		virtual void UpdateRSM(Camera const & rsm_camera, LightSource const & light) override;
+		virtual void CalcIndirectLighting(TexturePtr const & prev_shading_tex, float4x4 const & proj_to_prev) override;
 
 	private:
 		void ExtractVPLs(Camera const & rsm_camera, LightSource const & light);
@@ -90,21 +95,21 @@ namespace KlayGE
 
 		std::array<PostProcessPtr, LightSource::LT_NumLightTypes> rsm_to_vpls_pps_;
 		TexturePtr vpl_tex_;
+		RenderTargetViewPtr vpl_rtv_;
 
-		RenderTechniquePtr vpls_lighting_instance_id_tech_;
-		RenderTechniquePtr vpls_lighting_no_instance_id_tech_;
+		RenderEffectPtr vpls_lighting_effect_;
+		RenderTechnique* vpls_lighting_instance_id_tech_;
 
-		RenderEffectParameterPtr vpl_view_param_;
-		RenderEffectParameterPtr vpl_proj_param_;
-		RenderEffectParameterPtr vpl_depth_near_far_invfar_param_;
-		RenderEffectParameterPtr vpl_light_pos_es_param_;
-		RenderEffectParameterPtr vpl_light_color_param_;
-		RenderEffectParameterPtr vpl_light_falloff_param_;
-		RenderEffectParameterPtr vpl_x_coord_param_;
-		RenderEffectParameterPtr vpl_gbuffer_tex_param_;
-		RenderEffectParameterPtr vpl_depth_tex_param_;
+		RenderEffectParameter* vpl_view_param_;
+		RenderEffectParameter* vpl_proj_param_;
+		RenderEffectParameter* vpl_light_pos_es_param_;
+		RenderEffectParameter* vpl_light_color_param_;
+		RenderEffectParameter* vpl_light_falloff_param_;
+		RenderEffectParameter* vpl_x_coord_param_;
+		RenderEffectParameter* vpl_gbuffer_tex_param_;
+		RenderEffectParameter* vpl_depth_tex_param_;
 
-		RenderLayoutPtr rl_vpl_;
+		RenderablePtr vpl_renderable_;
 
 		TexturePtr rsm_depth_derivative_tex_;
 		PostProcessPtr rsm_to_depth_derivate_pp_;
@@ -115,24 +120,28 @@ namespace KlayGE
 	public:
 		SSGILayer();
 
-		virtual void GBuffer(TexturePtr const & rt0_tex, TexturePtr const & rt1_tex, TexturePtr const & depth_tex) KLAYGE_OVERRIDE;
-		virtual void RSM(TexturePtr const & rt0_tex, TexturePtr const & rt1_tex, TexturePtr const & depth_tex) KLAYGE_OVERRIDE;
+		virtual void GBuffer(TexturePtr const & rt0_tex, TexturePtr const & rt1_tex, TexturePtr const & depth_tex) override;
+		virtual void RSM(TexturePtr const & rt0_tex, TexturePtr const & rt1_tex, TexturePtr const & depth_tex) override;
 
-		virtual void UpdateGBuffer(Camera const & vp_camera) KLAYGE_OVERRIDE;
-		virtual void UpdateRSM(Camera const & rsm_camera, LightSource const & light) KLAYGE_OVERRIDE;
-		virtual void CalcIndirectLighting(TexturePtr const & prev_shading_tex, float4x4 const & proj_to_prev) KLAYGE_OVERRIDE;
+		virtual void UpdateGBuffer(Camera const & vp_camera) override;
+		virtual void UpdateRSM(Camera const & rsm_camera, LightSource const & light) override;
+		virtual void CalcIndirectLighting(TexturePtr const & prev_shading_tex, float4x4 const & proj_to_prev) override;
 
 	private:
 		MultiResLayerPtr multi_res_layer_;
 
 		TexturePtr g_buffer_rt0_tex_;
+		ShaderResourceViewPtr g_buffer_rt0_srv_;
 		TexturePtr g_buffer_depth_tex_;
-		Camera const * g_buffer_camera_;
+		ShaderResourceViewPtr g_buffer_depth_srv_;
 
 		PostProcessPtr ssgi_pp_;
 		PostProcessPtr ssgi_blur_pp_;
 
 		TexturePtr small_ssgi_tex_;
+		ShaderResourceViewPtr small_ssgi_srv_;
+
+		RenderTargetViewPtr indirect_lighting_rtv_;
 	};
 }
 

@@ -18,50 +18,17 @@
 	<macro name="VEU_TextureCoord" value="6"/>
 	<macro name="VEU_Tangent" value="7"/>
 	<macro name="VEU_Binormal" value="8"/>
-	
-	<macro name="TS_Diffuse" value="0"/>
-	<macro name="TS_Specular" value="1"/>
-	<macro name="TS_Shininess" value="2"/>
-	<macro name="TS_Normal" value="3"/>
-	<macro name="TS_Height" value="4"/>
-	<macro name="TS_Emit" value="5"/>
-	<macro name="TS_Opacity" value="6"/>
+
+	<macro name="TS_Albedo" value="0"/>
+	<macro name="TS_Metalness" value="1"/>
+	<macro name="TS_Glossiness" value="2"/>
+	<macro name="TS_Emissive" value="3"/>
+	<macro name="TS_Opacity" value="4"/>
+	<macro name="TS_Normal" value="5"/>
+	<macro name="TS_Height" value="6"/>
 
 	<shader>
 		<![CDATA[
-void CalcPosLH(float3 pos,
-				float3x3 obj_to_ts,
-				out float4 oPos,
-				out float2 oTsToView0_2xy,
-				out float4 oTsToView0_2z,
-				out float4 oTsToView1_Depth,
-#ifdef NOPERSPECTIVE_SUPPORT
-				out noperspective float2 oScreenTc
-#else
-				out float3 oScreenTc
-#endif
-				)
-{
-	oPos = mul(float4(pos, 1), mvp);
-
-	float3x3 ts_to_view = mul(obj_to_ts, (float3x3)model_view);
-	oTsToView0_2z.xyz = ts_to_view[0];
-	oTsToView1_Depth.xyz = ts_to_view[1];
-	oTsToView0_2xy.xy = ts_to_view[2].xy;
-	oTsToView0_2z.w = ts_to_view[2].z;
-	
-	oTsToView1_Depth.w = oPos.w;
-	
-	oScreenTc.xy = oPos.xy / oPos.w * 0.5f;
-	oScreenTc.y *= KLAYGE_FLIPPING;
-	oScreenTc.xy += 0.5f;
-	
-#ifndef NOPERSPECTIVE_SUPPORT
-	oScreenTc.z = oPos.w;
-	oScreenTc.xy *= oScreenTc.z;
-#endif
-}
-
 float4 VisualizeVertex(float3 pos, float3 tangent, float3 binormal, float3 normal,
 						float4 blend_weights, int4 blend_indices, float2 tex)
 {
@@ -101,91 +68,43 @@ float4 VisualizeVertex(float3 pos, float3 tangent, float3 binormal, float3 norma
 float4 VisualizeTexture(float2 tex0)
 {
 	float4 ret;
-	if (TS_Diffuse == texture_slot)
+	if (TS_Albedo == texture_slot)
 	{
-		if (diffuse_clr.w > 0.5f)
-		{
-			ret = float4(diffuse_tex.Sample(aniso_sampler, tex0).rgb, 1);
-		}
-		else
-		{
-			ret = float4(diffuse_clr.rgb, 1);
-		}
+		ret = float4(AlbedoNode(tex0), 0);
 	}
-	else if (TS_Specular == texture_slot)
+	else if (TS_Metalness == texture_slot)
 	{
-		if (specular_clr.w > 0.5f)
-		{
-			ret = float4(specular_tex.Sample(aniso_sampler, tex0).rgb, 1);
-		}
-		else
-		{
-			ret = float4(specular_clr.rgb, 1);
-		}
+		ret = float4(MetalnessGlossinessNode(tex0).xxx, 0);
 	}
-	else if (TS_Shininess == texture_slot)
+	else if (TS_Glossiness == texture_slot)
 	{
-		if (shininess_clr.y > 0.5f)
-		{
-			ret = float4(shininess_tex.Sample(aniso_sampler, tex0).rrr, 1);
-		}
-		else
-		{
-			ret = float4(shininess_clr.rrr, 1);
-		}
+		ret = float4(MetalnessGlossinessNode(tex0).yyy, 0);
+	}
+	else if (TS_Emissive == texture_slot)
+	{
+		ret = float4(EmissiveNode(tex0), 0);
+	}
+	else if (TS_Opacity == texture_slot)
+	{
+		ret = float4(OpacityNode(tex0).xxx, 0);
 	}
 	else if (TS_Normal == texture_slot)
 	{
-		if (normal_map_enabled)
-		{
-			ret = float4(decompress_normal(normal_tex.Sample(aniso_sampler, tex0)).rgb, 1);
-		}
-		else
-		{
-			ret = float4(0, 0, 1, 1);
-		}
+		ret = float4(NormalNode(tex0), 0);
 	}
-	else if (TS_Height == texture_slot)
+	else //if (TS_Height == texture_slot)
 	{
-		if (height_map_enabled)
-		{
-			ret = float4(height_tex.Sample(aniso_sampler, tex0).rrr, 1);
-		}
-		else
-		{
-			ret = float4(0, 0, 0, 1);
-		}
-	}
-	else if (TS_Emit == texture_slot)
-	{
-		if (emit_clr.w > 0.5f)
-		{
-			ret = float4(emit_tex.Sample(aniso_sampler, tex0).rgb * 16, 1);
-		}
-		else
-		{
-			ret = float4(emit_clr.rgb, 1);
-		}
-	}
-	else //if (TS_Opacity == texture_slot)
-	{
-		if (opacity_map_enabled)
-		{
-			ret = diffuse_tex.Sample(aniso_sampler, tex0).a;
-		}
-		else
-		{
-			ret = opacity_clr;
-		}
+		ret = float4((HeightForParallaxNode(tex0) + HeightForTessellationNode(tex0)).xxx, 0);
 	}
 
 	return ret;
 }
 
-void VisualizeVertexVS(float4 pos : POSITION,
+void VisualizeVertexVS(uint instance_id : SV_InstanceID,
+				float4 pos : POSITION,
 				float2 texcoord : TEXCOORD0,
 				float4 tangent_quat	: TANGENT,	// in object space
-#if SKINNING_ON
+#if NUM_JOINTS > 0
 				float4 blend_weights : BLENDWEIGHT,
 #if KLAYGE_OPENGL || KLAYGE_OPENGLES
 				float4 blend_indices_f : BLENDINDICES,
@@ -196,7 +115,7 @@ void VisualizeVertexVS(float4 pos : POSITION,
 				out float4 oClr : COLOR,
 				out float4 oPos : SV_Position)
 {
-#if SKINNING_ON
+#if NUM_JOINTS > 0
 #if KLAYGE_OPENGL || KLAYGE_OPENGLES
 	int4 blend_indices = (int4)blend_indices_f;
 #endif
@@ -208,17 +127,15 @@ void VisualizeVertexVS(float4 pos : POSITION,
 	pos = float4(pos.xyz * pos_extent + pos_center, 1);
 	texcoord = texcoord * tc_extent + tc_center;
 	tangent_quat = tangent_quat * 2 - 1;
-	
+
+	KlayGECameraInfo camera = CameraFromInstance(instance_id);
+	float4x4 mvp = camera.mvp;
+
 	float3 result_pos;
 	float4 result_tangent_quat;
-	float2 oTex;
-	CalcMesh(pos, texcoord, tangent_quat,
-#if SKINNING_ON
-				blend_weights, blend_indices,
-#endif
-				oTex, result_pos,
-				result_tangent_quat);
-				
+	PositionNode(pos.xyz, tangent_quat, blend_weights, blend_indices, result_pos, result_tangent_quat);
+	float2 oTex = TexcoordNode(texcoord);
+
 	float3x3 obj_to_ts;
 	obj_to_ts[0] = transform_quat(float3(1, 0, 0), result_tangent_quat);
 	obj_to_ts[1] = transform_quat(float3(0, 1, 0), result_tangent_quat) * sign(result_tangent_quat.w);
@@ -228,43 +145,23 @@ void VisualizeVertexVS(float4 pos : POSITION,
 	oClr = VisualizeVertex(result_pos, obj_to_ts[0], obj_to_ts[1], obj_to_ts[2], blend_weights, blend_indices, oTex);
 }
 
-float4 VisualizeVertexRT0PS() : SV_Target
+void VisualizeVertexPS(float4 clr : COLOR,
+				out float4 rt0 : SV_Target0, out float4 rt1 : SV_Target1)
 {
-	return 0;
+	rt0 = 0;
+	rt1 = clr;
 }
 
-float4 VisualizeVertexRT1PS(float4 clr : COLOR) : SV_Target
+void VisualizeTexturePS(float2 tex0 : TEXCOORD0,
+				out float4 rt0 : SV_Target0, out float4 rt1 : SV_Target1)
 {
-	return clr;
-}
-
-void VisualizeVertexMRTPS(float4 clr : COLOR,
-				out float4 mrt_0 : SV_Target0, out float4 mrt_1 : SV_Target1)
-{
-	mrt_0 = 0;
-	mrt_1 = clr;
-}
-
-float4 VisualizeTextureRT0PS() : SV_Target
-{
-	return 0;
-}
-
-float4 VisualizeTextureRT1PS(float2 tex0 : TEXCOORD0) : SV_Target
-{
-	return VisualizeTexture(tex0);
-}
-
-void VisualizeTextureMRTPS(float2 tex0 : TEXCOORD0,
-				out float4 mrt_0 : SV_Target0, out float4 mrt_1 : SV_Target1)
-{
-	mrt_0 = 0;
-	mrt_1 = VisualizeTexture(tex0);
+	rt0 = 0;
+	rt1 = VisualizeTexture(tex0);
 }
 		]]>
 	</shader>
 
-	<technique name="VisualizeVertexRT0Tech">
+	<technique name="VisualizeVertexTech">
 		<pass name="p0">
 			<state name="cull_mode" value="back"/>
 
@@ -278,47 +175,11 @@ void VisualizeTextureMRTPS(float2 tex0 : TEXCOORD0,
 			<state name="back_stencil_pass" value="replace"/>
 
 			<state name="vertex_shader" value="VisualizeVertexVS()"/>
-			<state name="pixel_shader" value="VisualizeVertexRT0PS()"/>
+			<state name="pixel_shader" value="VisualizeVertexPS()"/>
 		</pass>
 	</technique>
 
-	<technique name="VisualizeVertexRT1Tech">
-		<pass name="p0">
-			<state name="cull_mode" value="back"/>
-
-			<state name="front_stencil_enable" value="true"/>
-			<state name="front_stencil_func" value="always_pass"/>
-			<state name="front_stencil_ref" value="128"/>
-			<state name="front_stencil_pass" value="replace"/>
-			<state name="back_stencil_enable" value="true"/>
-			<state name="back_stencil_func" value="always_pass"/>
-			<state name="back_stencil_ref" value="128"/>
-			<state name="back_stencil_pass" value="replace"/>
-
-			<state name="vertex_shader" value="VisualizeVertexVS()"/>
-			<state name="pixel_shader" value="VisualizeVertexRT1PS()"/>
-		</pass>
-	</technique>
-
-	<technique name="VisualizeVertexMRTTech">
-		<pass name="p0">
-			<state name="cull_mode" value="back"/>
-
-			<state name="front_stencil_enable" value="true"/>
-			<state name="front_stencil_func" value="always_pass"/>
-			<state name="front_stencil_ref" value="128"/>
-			<state name="front_stencil_pass" value="replace"/>
-			<state name="back_stencil_enable" value="true"/>
-			<state name="back_stencil_func" value="always_pass"/>
-			<state name="back_stencil_ref" value="128"/>
-			<state name="back_stencil_pass" value="replace"/>
-
-			<state name="vertex_shader" value="VisualizeVertexVS()"/>
-			<state name="pixel_shader" value="VisualizeVertexMRTPS()"/>
-		</pass>
-	</technique>
-
-	<technique name="VisualizeTextureRT0Tech">
+	<technique name="VisualizeTextureTech">
 		<pass name="p0">
 			<state name="cull_mode" value="back"/>
 
@@ -332,43 +193,65 @@ void VisualizeTextureMRTPS(float2 tex0 : TEXCOORD0,
 			<state name="back_stencil_pass" value="replace"/>
 
 			<state name="vertex_shader" value="GBufferVS()"/>
-			<state name="pixel_shader" value="VisualizeTextureRT0PS()"/>
+			<state name="pixel_shader" value="VisualizeTexturePS()"/>
 		</pass>
 	</technique>
 
-	<technique name="VisualizeTextureRT1Tech">
+	<parameter type="texture2D" name="color_map"/>
+	<parameter type="sampler" name="linear_sampler">
+		<state name="filtering" value="min_mag_linear_mip_point"/>
+		<state name="address_u" value="wrap"/>
+		<state name="address_v" value="wrap"/>
+	</parameter>
+
+	<shader>
+		<![CDATA[
+void SkeletonVS(uint instance_id : SV_InstanceID,
+				float4 pos : POSITION,
+#if NUM_JOINTS > 0
+#if KLAYGE_OPENGL || KLAYGE_OPENGLES
+				float4 blend_indices_f : BLENDINDICES,
+#else
+				uint4 blend_indices : BLENDINDICES,
+#endif
+#endif
+				out float oColor : COLOR0,
+				out float4 oPos : SV_Position)
+{
+#if NUM_JOINTS > 0
+#if KLAYGE_OPENGL || KLAYGE_OPENGLES
+	int4 blend_indices = (int4)blend_indices_f;
+#endif
+#else
+	int4 blend_indices = 0;
+#endif
+
+	float3 result_pos;
+	float4 result_tangent_quat;
+	PositionNode(pos.xyz, 0, float4(1, 0, 0, 0), blend_indices, result_pos, result_tangent_quat);
+	float2 oTex = TexcoordNode(0);
+
+	KlayGECameraInfo camera = CameraFromInstance(instance_id);
+	float4x4 mvp = camera.mvp;
+
+	oColor = pos.w;
+	oPos = mul(float4(result_pos, 1), mvp);
+}
+
+float4 SkeletonPS(float color : COLOR0) : SV_Target
+{
+	return color_map.SampleLevel(linear_sampler, float2(color, 0.5f), 0);
+}
+		]]>
+	</shader>
+	<technique name="SkeletonTech">
 		<pass name="p0">
-			<state name="cull_mode" value="back"/>
+			<state name="cull_mode" value="none"/>
+			<state name="polygon_mode" value="line"/>
+			<state name="depth_enable" value="false"/>
 
-			<state name="front_stencil_enable" value="true"/>
-			<state name="front_stencil_func" value="always_pass"/>
-			<state name="front_stencil_ref" value="128"/>
-			<state name="front_stencil_pass" value="replace"/>
-			<state name="back_stencil_enable" value="true"/>
-			<state name="back_stencil_func" value="always_pass"/>
-			<state name="back_stencil_ref" value="128"/>
-			<state name="back_stencil_pass" value="replace"/>
-
-			<state name="vertex_shader" value="GBufferVS()"/>
-			<state name="pixel_shader" value="VisualizeTextureRT1PS()"/>
-		</pass>
-	</technique>
-
-	<technique name="VisualizeTextureMRTTech">
-		<pass name="p0">
-			<state name="cull_mode" value="back"/>
-
-			<state name="front_stencil_enable" value="true"/>
-			<state name="front_stencil_func" value="always_pass"/>
-			<state name="front_stencil_ref" value="128"/>
-			<state name="front_stencil_pass" value="replace"/>
-			<state name="back_stencil_enable" value="true"/>
-			<state name="back_stencil_func" value="always_pass"/>
-			<state name="back_stencil_ref" value="128"/>
-			<state name="back_stencil_pass" value="replace"/>
-
-			<state name="vertex_shader" value="GBufferVS()"/>
-			<state name="pixel_shader" value="VisualizeTextureMRTPS()"/>
+			<state name="vertex_shader" value="SkeletonVS()"/>
+			<state name="pixel_shader" value="SkeletonPS()"/>
 		</pass>
 	</technique>
 </effect>

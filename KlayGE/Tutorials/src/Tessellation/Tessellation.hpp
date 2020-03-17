@@ -10,8 +10,6 @@ class TessellationApp : public KlayGE::App3DFramework
 public:
 	TessellationApp();
 
-	bool ConfirmDevice() const;
-
 private:
 	void OnCreate();
 	void OnResize(KlayGE::uint32_t width, KlayGE::uint32_t height);
@@ -26,7 +24,7 @@ private:
 	void InsideChangedHandler(KlayGE::UISlider const & sender);
 
 	KlayGE::FontPtr font_;
-	KlayGE::SceneObjectPtr polygon_;
+	KlayGE::SceneNodePtr polygon_;
 
 	KlayGE::UIDialogPtr dialog_;
 	KlayGE::float4 tess_factor_;

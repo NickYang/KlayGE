@@ -81,30 +81,30 @@ namespace KlayGE
 			typedef aligned_allocator<U, alignment> other;
 		};
 
-		pointer address(reference val) const KLAYGE_NOEXCEPT
+		pointer address(reference val) const noexcept
 		{
 			return &val;
 		}
 
-		const_pointer address(const_reference val) const KLAYGE_NOEXCEPT
+		const_pointer address(const_reference val) const noexcept
 		{
 			return &val;
 		}
 
-		aligned_allocator() KLAYGE_NOEXCEPT
+		aligned_allocator() noexcept
 		{
 		}
 
-		aligned_allocator(aligned_allocator<T, alignment> const &) KLAYGE_NOEXCEPT
+		aligned_allocator(aligned_allocator<T, alignment> const &) noexcept
 		{
 		}
 
 		template <typename U, int alignment2>
-		aligned_allocator(aligned_allocator<U, alignment2> const &) KLAYGE_NOEXCEPT
+		aligned_allocator(aligned_allocator<U, alignment2> const &) noexcept
 		{
 		}
 
-		~aligned_allocator() KLAYGE_NOEXCEPT
+		~aligned_allocator() noexcept
 		{
 		}
 
@@ -138,20 +138,12 @@ namespace KlayGE
 			return p;
 		}
 
-#ifdef KLAYGE_CXX11_CORE_VARIADIC_TEMPLATES
 		template<typename U, typename... Args>
 		void construct(U* p, Args&&... args)
 		{
 			void* vp = p;
 			::new (vp) U(std::forward<Args>(args)...);
 		}
-#else
-		void construct(pointer p, T const & val)
-		{
-			void* vp = p;
-			::new (vp) T(val);
-		}
-#endif
 
 		template <typename U>
 		void destroy(U* p)
@@ -159,20 +151,20 @@ namespace KlayGE
 			destroy_t<U*, std::is_trivially_destructible<U>::value>()(p);
 		}
 
-		size_type max_size() const KLAYGE_NOEXCEPT
+		size_type max_size() const noexcept
 		{
 			return std::numeric_limits<size_t>::max() / sizeof(T);
 		}
 	};
 	
 	template <typename T, int alignment1, typename U, int alignment2>
-	inline bool operator==(aligned_allocator<T, alignment1> const &, aligned_allocator<U, alignment2> const &) KLAYGE_NOEXCEPT
+	inline bool operator==(aligned_allocator<T, alignment1> const &, aligned_allocator<U, alignment2> const &) noexcept
 	{
 		return true;
 	}
 
 	template <typename T, int alignment1, typename U, int alignment2>
-	inline bool operator!=(aligned_allocator<T, alignment1> const &, aligned_allocator<U, alignment2> const &) KLAYGE_NOEXCEPT
+	inline bool operator!=(aligned_allocator<T, alignment1> const &, aligned_allocator<U, alignment2> const &) noexcept
 	{
 		return false;
 	}
@@ -192,16 +184,16 @@ namespace KlayGE
 			typedef aligned_allocator<U, alignment> other;
 		};
 
-		aligned_allocator() KLAYGE_NOEXCEPT
+		aligned_allocator() noexcept
 		{
 		}
 
-		aligned_allocator(const aligned_allocator<void, alignment>&) KLAYGE_NOEXCEPT
+		aligned_allocator(const aligned_allocator<void, alignment>&) noexcept
 		{
 		}
 
 		template <typename U, int alignment2>
-		aligned_allocator(const aligned_allocator<U, alignment2>&) KLAYGE_NOEXCEPT
+		aligned_allocator(const aligned_allocator<U, alignment2>&) noexcept
 		{
 		}
 

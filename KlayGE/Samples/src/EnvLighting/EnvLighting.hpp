@@ -10,8 +10,6 @@ class EnvLightingApp : public KlayGE::App3DFramework
 public:
 	EnvLightingApp();
 
-	bool ConfirmDevice() const;
-
 private:
 	void OnCreate();
 	void DoUpdateOverlay();
@@ -22,16 +20,18 @@ private:
 	void TypeChangedHandler(KlayGE::UIComboBox const & sender);
 
 	KlayGE::FontPtr font_;
-	std::vector<KlayGE::SceneObjectPtr> spheres_;
-	KlayGE::SceneObjectPtr sky_box_;
+	KlayGE::SceneNodePtr sphere_group_;
+	std::vector<KlayGE::RenderModelPtr> sphere_models_;
 
 	KlayGE::TrackballCameraController obj_controller_;
 
-	KlayGE::TexturePtr integrate_brdf_tex_;
+	KlayGE::TexturePtr integrated_brdf_tex_;
 
 	KlayGE::UIDialogPtr dialog_;
 	int rendering_type_;
 	int id_type_combo_;
+
+	float distance_ = 0.8f;
 };
 
 #endif		// _ENVLIGHTING_HPP

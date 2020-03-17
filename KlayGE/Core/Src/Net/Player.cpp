@@ -23,8 +23,6 @@
 #include <KlayGE/NetMsg.hpp>
 #include <KlayGE/Player.hpp>
 
-#ifndef KLAYGE_PLATFORM_WINDOWS_RUNTIME
-
 namespace
 {
 	class ReceiveThreadFunc
@@ -82,7 +80,7 @@ namespace KlayGE
 			}
 
 			char revBuf[Max_Buffer];
-			std::fill_n(revBuf, sizeof(revBuf), 0);
+			memset(revBuf, 0, sizeof(revBuf));
 			if (socket_.Receive(revBuf, sizeof(revBuf)) != -1)
 			{
 				uint32_t ID;
@@ -124,7 +122,7 @@ namespace KlayGE
 		socket_.TimeOut(2000);
 
 		char buf[Max_Buffer];
-		std::fill_n(buf, sizeof(buf), 0);
+		memset(buf, 0, sizeof(buf));
 
 		buf[0] = MSG_JOIN;
 		name_.copy(&buf[1], this->name_.length());
@@ -219,5 +217,3 @@ namespace KlayGE
 		return socket_.Send(buf, size);
 	}
 }
-
-#endif

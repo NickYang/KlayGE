@@ -1,0 +1,1109 @@
+<?xml version='1.0'?>
+
+<effect>
+	<macro name="LIGHT_BATCH" value="1024"/>
+	<macro name="NUM_DEPTH_SLICES" value="4"/>
+	
+	<include name="DeferredRendering.fxml"/>
+	<include name="PostProcess.fxml"/>
+
+	<macro name="BLOCK_X" value="16"/>
+	<macro name="BLOCK_Y" value="16"/>
+	<macro name="BLOCK_SIZE" value="(BLOCK_X * BLOCK_Y)"/>
+	<macro name="TILE_SIZE" value="32"/>
+
+	<parameter type="float4" name="near_q_far"/>
+	<parameter type="uint2" name="width_height"/>
+	<parameter type="texture2D" name="ds_in_tex"/>
+	<parameter type="texture2DMS" name="linear_depth_in_tex_ms"/>
+	<parameter type="rw_texture2D" elem_type="float2" name="min_max_depth_rw_tex"/>
+	<parameter type="rw_texture2D" elem_type="float" name="linear_depth_rw_tex"/>
+
+	<shader type="compute_shader" version="5">
+		<![CDATA[
+groupshared float2 min_max_depth_sh[BLOCK_SIZE];
+
+[numthreads(BLOCK_X, BLOCK_Y, 1)]
+void DepthToTiledMinMaxCS(uint3 gid : SV_GroupID,
+							uint3 gtid : SV_GroupThreadID,
+							uint GI : SV_GroupIndex)
+{
+	float2 min_max_depth = float2(asfloat(0x7F7FFFFF), 0.0f);
+
+#if KLAYGE_EXPLICIT_MULTI_SAMPLE_SUPPORT && MULTI_SAMPLE_INPUT
+	uint width, height, samples;
+	linear_depth_in_tex_ms.GetDimensions(width, height, samples);
+#endif
+	
+	uint2 tile_start = gid.xy * TILE_SIZE + gtid.xy;
+	for (uint tile_y = 0; tile_y < TILE_SIZE; tile_y += BLOCK_Y)
+	{
+		for (uint tile_x = 0; tile_x < TILE_SIZE; tile_x += BLOCK_X)
+		{
+			uint2 coord = tile_start + uint2(tile_x, tile_y);
+			uint2 input_coord = min(coord, width_height);
+#if KLAYGE_EXPLICIT_MULTI_SAMPLE_SUPPORT && MULTI_SAMPLE_INPUT
+			float pixel_min_depth = asfloat(0x7F7FFFFF);
+			for (uint i = 0; i < samples; ++ i)
+			{
+				float depth = linear_depth_in_tex_ms.Load(input_coord, i).x;
+				pixel_min_depth = min(pixel_min_depth, depth);
+				min_max_depth = float2(min(min_max_depth.x, depth), max(min_max_depth.y, depth));
+			}
+			linear_depth_rw_tex[coord] = pixel_min_depth;
+#else
+			float depth = non_linear_depth_to_linear(ds_in_tex.Load(uint3(input_coord, 0)).x, near_q_far.x, near_q_far.y);
+			linear_depth_rw_tex[coord] = depth;
+			min_max_depth = float2(min(min_max_depth.x, depth), max(min_max_depth.y, depth));
+#endif
+		}
+	}
+
+	min_max_depth_sh[GI] = min_max_depth;
+	GroupMemoryBarrierWithGroupSync();
+
+	for (uint offset = BLOCK_SIZE >> 1; offset > 32; offset >>= 1)
+	{
+		if (GI < offset)
+		{
+			min_max_depth_sh[GI].x = min(min_max_depth_sh[GI].x, min_max_depth_sh[GI + offset].x);
+			min_max_depth_sh[GI].y = max(min_max_depth_sh[GI].y, min_max_depth_sh[GI + offset].y);
+		}
+		GroupMemoryBarrierWithGroupSync();
+	}
+	for (offset = 32; offset > 0; offset >>= 1)
+	{
+		if (GI < offset)
+		{
+			min_max_depth_sh[GI].x = min(min_max_depth_sh[GI].x, min_max_depth_sh[GI + offset].x);
+			min_max_depth_sh[GI].y = max(min_max_depth_sh[GI].y, min_max_depth_sh[GI + offset].y);
+		}
+	}
+	
+	if (0 == GI)
+	{
+		min_max_depth_rw_tex[gid.xy] = min_max_depth_sh[0];
+	}
+}
+		]]>
+	</shader>
+
+	<technique name="DepthToTiledMinMax">
+		<pass name="p0">
+			<state name="compute_shader" value="DepthToTiledMinMaxCS()"/>
+		</pass>
+	</technique>
+	<technique name="DepthToTiledMinMaxMS" inherit="DepthToTiledMinMax">
+		<macro name="MULTI_SAMPLE_INPUT" value="1"/>
+	</technique>
+
+	<parameter type="texture2DMS" name="g_buffer_rt0_tex_ms"/>
+	<parameter type="texture2DMS" name="g_buffer_rt1_tex_ms"/>
+	<parameter type="texture2DMS" name="g_buffer_rt2_tex_ms"/>
+	<parameter type="texture2DMS" name="g_buffer_ds_tex_ms"/>
+	<parameter type="texture2DMS" name="g_buffer_depth_tex_ms"/>
+
+	<shader>
+		<![CDATA[
+void ResolveGBuffersPS(float2 texcoord : TEXCOORD0,
+		out float4 out_rt0 : SV_Target0,
+		out float4 out_rt1 : SV_Target1,
+		out float4 out_rt2 : SV_Target2,
+		out float out_depth : SV_Target3,
+		out float out_multi_sample_mark : SV_Target4)
+{
+#if KLAYGE_EXPLICIT_MULTI_SAMPLE_SUPPORT
+	uint width, height, samples;
+	g_buffer_rt0_tex_ms.GetDimensions(width, height, samples);	
+	int2 coord = texcoord * int2(width, height);
+
+	float4 rt0_s0 = g_buffer_rt0_tex_ms.Load(coord, 0);
+	float4 rt1_s0 = g_buffer_rt1_tex_ms.Load(coord, 0);
+	float z_s0 = g_buffer_ds_tex_ms.Load(coord, 0).x;
+	
+	float min_z = z_s0;
+	uint min_index = 0;
+	bool is_multi_sample = false;
+	for (uint i = 1; i < samples; ++ i)
+	{
+		float4 rt0_sn = g_buffer_rt0_tex_ms.Load(coord, i);
+		float4 rt1_sn = g_buffer_rt1_tex_ms.Load(coord, i);
+		float z_sn = g_buffer_ds_tex_ms.Load(coord, i).x;
+		
+		if (z_sn < min_z)
+		{
+			min_z = z_sn;
+			min_index = i;
+		}
+		
+		float4 rt0_diff = rt0_sn - rt0_s0;
+		float4 rt1_diff = rt1_sn - rt1_s0;
+		if ((abs(z_sn - z_s0) > 1e-3f)
+			|| (dot(rt0_diff, rt0_diff) > 1e-3f)
+			|| (dot(rt1_diff, rt1_diff) > 1e-3f))
+		{
+			is_multi_sample = true;
+		}
+	}
+	
+	out_rt0 = g_buffer_rt0_tex_ms.Load(coord, min_index);
+	out_rt1 = g_buffer_rt1_tex_ms.Load(coord, min_index);
+	out_rt2 = g_buffer_rt2_tex_ms.Load(coord, min_index);
+	out_depth = non_linear_depth_to_linear(g_buffer_ds_tex_ms.Load(coord, min_index).x, near_q_far.x, near_q_far.y);
+	out_multi_sample_mark = is_multi_sample;
+#else
+	out_rt0 = 0;
+	out_rt1 = 0,
+	out_rt2 = 0,
+	out_depth = 0;
+	out_multi_sample_mark = 0;
+#endif
+}
+		]]>
+	</shader>
+
+	<technique name="ResolveGBuffers">
+		<pass name="p0">
+			<state name="depth_enable" value="false"/>
+			<state name="depth_write_mask" value="false"/>
+
+			<state name="cull_mode" value="front"/>
+
+			<state name="vertex_shader" value="PostProcessVS()"/>
+			<state name="pixel_shader" value="ResolveGBuffersPS()"/>
+		</pass>
+	</technique>
+
+	<shader>
+		<![CDATA[
+float ResolveMergedDepthPS(float2 texcoord : TEXCOORD0) : SV_Target
+{
+#if KLAYGE_EXPLICIT_MULTI_SAMPLE_SUPPORT
+	uint width, height, samples;
+	g_buffer_ds_tex_ms.GetDimensions(width, height, samples);	
+	int2 coord = texcoord * int2(width, height);
+
+	float min_z = g_buffer_ds_tex_ms.Load(coord, 0).x;
+	for (uint i = 1; i < samples; ++ i)
+	{
+		float z = g_buffer_ds_tex_ms.Load(coord, i).x;		
+		if (z < min_z)
+		{
+			min_z = z;
+		}
+	}
+
+	return min_z;
+#else
+	return 0;
+#endif
+}
+		]]>
+	</shader>
+
+	<technique name="ResolveMergedDepth">
+		<pass name="p0">
+			<state name="depth_enable" value="false"/>
+			<state name="depth_write_mask" value="false"/>
+
+			<state name="cull_mode" value="front"/>
+
+			<state name="vertex_shader" value="PostProcessVS()"/>
+			<state name="pixel_shader" value="ResolveMergedDepthPS()"/>
+		</pass>
+	</technique>
+
+	<cbuffer name="overlap_test">
+		<parameter type="float4" name="tile_scale"/>
+		<parameter type="float2" name="camera_proj_01"/>
+		<parameter type="float3" name="lights_aabb_min" array_size="LIGHT_BATCH"/>
+		<parameter type="float3" name="lights_aabb_max" array_size="LIGHT_BATCH"/>
+		<parameter type="float" name="depth_slices" array_size="NUM_DEPTH_SLICES + 1"/>
+		<parameter type="float3" name="depth_slices_shading"/>
+	</cbuffer>
+	<cbuffer name="light_batch1">
+		<parameter type="float4" name="lights_color" array_size="LIGHT_BATCH"/>
+		<parameter type="float4" name="lights_pos_es" array_size="LIGHT_BATCH"/>
+		<parameter type="float4" name="lights_dir_es" array_size="LIGHT_BATCH"/>
+		<parameter type="float4" name="lights_falloff_range" array_size="LIGHT_BATCH"/>
+	</cbuffer>
+	<cbuffer name="light_batch2">
+		<parameter type="float4" name="lights_attrib" array_size="LIGHT_BATCH"/>
+		<parameter type="float4" name="lights_radius_extend" array_size="LIGHT_BATCH"/>
+		<parameter type="uint" name="lights_type" array_size="12"/>
+	</cbuffer>
+	<parameter type="texture2D" elem_type="uint2" name="g_buffer_stencil_tex"/>
+	<parameter type="texture2DMS" elem_type="uint2" name="g_buffer_stencil_tex_ms"/>
+	<parameter type="texture2D" name="shading_in_tex"/>
+	<parameter type="texture2DMS" name="shading_in_tex_ms"/>
+	<parameter type="texture2D" name="multi_sample_mask_tex"/>
+	<parameter type="rw_texture2D" name="shading_rw_tex"/>
+	<parameter type="rw_texture2DArray" name="shading_rw_tex_array"/>
+
+	<parameter type="texture2DArray" elem_type="uint" name="lights_start_in_tex"/>
+	<parameter type="rw_texture2DArray" elem_type="uint" name="lights_start_rw_tex"/>
+	<parameter type="texture2DArray" elem_type="uint" name="intersected_light_indices_in_tex"/>
+	<parameter type="rw_texture2DArray" elem_type="uint" name="intersected_light_indices_rw_tex"/>
+
+	<parameter type="float3" name="upper_left"/>
+	<parameter type="float3" name="x_dir"/>
+	<parameter type="float3" name="y_dir"/>
+
+	<macro name="SCAN_TYPE" value="uint"/>
+	<include name="PrefixSum.fxml"/>
+
+	<shader type="compute_shader" version="5">
+		<![CDATA[
+void CalcTileViewFrustum(uint2 coord, float2 min_max, out float4 planes[6])
+{
+	float near_plane = min_max.x;
+	float far_plane = min_max.y;
+	
+	if (far_plane - near_plane < 1e-3f)
+	{
+		far_plane += 1e-3f;
+	}
+
+	float2 tile_bias = tile_scale.xy - coord;
+	float q = far_plane / (far_plane - near_plane);
+
+	float4 column1 = float4(camera_proj_01.x, 0, tile_bias.x, 0);
+	float4 column2 = float4(0, -camera_proj_01.y, tile_bias.y, 0);
+	float4 column3 = float4(0, 0, q, -near_plane * q);
+	float4 column4 = float4(0, 0, 1, 0);
+	planes[0] = column4 - column1;
+	planes[1] = column4 + column1;
+	planes[2] = column4 - column2;
+	planes[3] = column4 + column2;
+	planes[4] = column4 - column3;
+	// TODO: Should be column3 only
+	planes[5] = column4 + column3;
+	for (int i = 0; i < 6; ++ i)
+	{
+		planes[i] /= length(planes[i].xyz);
+	}
+}
+
+int OverlapTestPoint(float4 planes[6], uint light_index)
+{
+	int overlap = 1;
+	for (int j = 0; j < 6; ++ j)
+	{
+		float d = dot(planes[j], float4(lights_pos_es[light_index].xyz, 1));
+		overlap *= (d > -lights_falloff_range[light_index].w);
+	}
+
+	return overlap;
+}
+
+int OverlapTestSpot(float4 planes[6], uint light_index)
+{
+	float3 min_pt = lights_aabb_min[light_index];
+	float3 max_pt = lights_aabb_max[light_index];
+
+	int overlap = 1;
+	for (int j = 0; j < 6; ++ j)
+	{
+		float4 plane = planes[j];
+		float3 v0 = plane.xyz < 0 ? min_pt : max_pt;
+		overlap *= (dot(plane, float4(v0, 1)) >= 0);
+	}
+
+	return overlap;
+}
+
+float3 texcoord_to_view(float2 tex)
+{
+	return upper_left + x_dir * tex.x + y_dir * tex.y;
+}
+
+float4 NearestDepthUpsamplingShadowLevel(float2 tc, int channel)
+{
+	float2 l1_inv_width_height = inv_width_height * 2;
+	float2 tc0 = tc - inv_width_height;
+	float z00 = depth_tex.SampleLevel(point_sampler, tc0, 1).x;
+	float z10 = depth_tex.SampleLevel(point_sampler, tc0 + float2(l1_inv_width_height.x, 0), 1).x;
+	float z01 = depth_tex.SampleLevel(point_sampler, tc0 + float2(0, l1_inv_width_height.y), 1).x;
+	float z11 = depth_tex.SampleLevel(point_sampler, tc0 + l1_inv_width_height, 1).x;
+	float z_full = depth_tex.SampleLevel(point_sampler, tc, 0).x;
+	float threshold = 0.25f;
+
+	float3 ndus = NearestDepthUpsampling(tc0, float4(z00, z10, z01, z11), z_full, l1_inv_width_height, threshold);
+	if (ndus.z > 0)
+	{
+		if (channel < 4)
+		{
+			return shadowing_tex.SampleLevel(linear_sampler, tc, 0)[channel];
+		}
+		else
+		{
+			return projective_shadowing_tex.SampleLevel(linear_sampler, tc, 0);
+		}
+	}
+	else
+	{
+		if (channel < 4)
+		{
+			return shadowing_tex.SampleLevel(point_sampler, ndus.xy, 0)[channel];
+		}
+		else
+		{
+			return projective_shadowing_tex.SampleLevel(point_sampler, ndus.xy, 0);
+		}
+	}
+}
+
+float3 CalcClusteredDRShading(uint index, int shadowing_channel, float3 light_dir, float3 normal, float3 view_dir, float dist,
+		float3 c_diff, float3 c_spec, float spec_normalize, float shininess, float2 tc, float atten)
+{
+	float3 shading = 0;
+	if ((dist < 0) || (dist < lights_falloff_range[index].w))
+	{
+		float n_dot_l = dot(normal, light_dir);
+		if (n_dot_l > 0)
+		{
+			float3 shadow = 1;
+			if (shadowing_channel >= 0)
+			{
+				shadow = NearestDepthUpsamplingShadowLevel(tc, shadowing_channel).xyz;
+			}
+
+			float3 halfway = normalize(light_dir + view_dir);
+			float3 spec = spec_normalize * DistributionTerm(halfway, normal, shininess)
+				* FresnelTerm(light_dir, halfway, c_spec);
+			shading = max((c_diff * lights_attrib[index].x + spec * lights_attrib[index].y) * (n_dot_l * atten), 0)
+				* lights_color[index].rgb * shadow;
+		}
+	}
+
+	return shading;
+}
+
+float3 CalcClusteredDRPoint(uint index, int shadowing_channel, float3 pos_es, float3 normal, float3 view_dir,
+		float3 c_diff, float3 c_spec, float spec_normalize, float shininess, float2 tc)
+{
+	float3 light_pos = lights_pos_es[index].xyz;
+	float3 light_dir = light_pos - pos_es;
+	float dist = length(light_dir);
+	light_dir /= dist;
+	return CalcClusteredDRShading(index, shadowing_channel,
+		light_dir, normal, view_dir, dist,
+		c_diff, c_spec, spec_normalize, shininess, tc,
+		AttenuationTerm(light_pos, pos_es, lights_falloff_range[index].xyz));
+}
+
+float3 CalcClusteredDRSpot(uint index, int shadowing_channel, float3 pos_es, float3 normal, float3 view_dir,
+		float3 c_diff, float3 c_spec, float spec_normalize, float shininess, float2 tc)
+{
+	float3 light_pos = lights_pos_es[index].xyz;
+	float3 light_dir = light_pos - pos_es;
+	float dist = length(light_dir);
+	light_dir /= dist;
+	float3 shading = 0;
+	float spot = SpotLighting(light_pos, lights_dir_es[index].xyz,
+		float2(lights_pos_es[index].w, lights_dir_es[index].w), pos_es);
+	if (spot > 0)
+	{
+		shading = CalcClusteredDRShading(index, shadowing_channel,
+			light_dir, normal, view_dir, dist,
+			c_diff, c_spec, spec_normalize, shininess, tc,
+			spot * AttenuationTerm(light_pos, pos_es, lights_falloff_range[index].xyz));
+	}
+	
+	return shading;
+}
+
+float3 CalcClusteredDRSphereArea(uint index, int shadowing_channel, float3 pos_es, float3 normal, float3 view_dir,
+		float3 c_diff, float3 c_spec, float spec_normalize, float shininess, float2 tc)
+{
+	float3 light_pos = lights_pos_es[index].xyz;
+	light_pos = SphereAreaLightPositionFixup(light_pos, lights_radius_extend[index].x, pos_es,
+		normal, -view_dir);
+	shininess = AreaLightShininessFixup(shininess, light_pos, lights_radius_extend[index].x, pos_es);
+	float3 light_dir = light_pos - pos_es;
+	float dist = length(light_dir);
+	light_dir /= dist;
+	return CalcClusteredDRShading(index, shadowing_channel,
+		light_dir, normal, view_dir, dist,
+		c_diff, c_spec, spec_normalize, shininess, tc,
+		AttenuationTerm(light_pos, pos_es, lights_falloff_range[index].xyz));
+}
+
+float3 CalcClusteredDRTubeArea(uint index, int shadowing_channel, float3 pos_es, float3 normal, float3 view_dir,
+		float3 c_diff, float3 c_spec, float spec_normalize, float shininess, float2 tc)
+{
+	float3 light_pos = lights_pos_es[index].xyz;
+	float3 l0 = light_pos - lights_radius_extend[index].yzw - pos_es;
+	float3 l1 = light_pos + lights_radius_extend[index].yzw - pos_es;
+	light_pos = TubeAreaLightPositionFixup(l0, l1, pos_es, normal, -view_dir);
+	float2 atten_irra_factor = TubeAreaLightAttenuationIrradianceFixup(l0, l1, normal);
+	shininess = AreaLightShininessFixup(shininess, light_pos, lights_radius_extend[index].x, pos_es);
+	float3 light_dir = light_pos - pos_es;
+	float dist = length(light_dir);
+	light_dir /= dist;
+	return CalcClusteredDRShading(index, shadowing_channel,
+		light_dir, normal, view_dir, dist,
+		c_diff, c_spec, spec_normalize, shininess, tc, atten_irra_factor.x * atten_irra_factor.y);
+}
+
+uint2 Get2DOffset(uint offset)
+{
+	uint offset_y = offset / 32;
+	uint offset_x = offset - offset_y * 32;
+	return uint2(offset_x, offset_y);
+}
+
+uint ReadALightIndex(uint3 tile_id, uint offset)
+{
+	return intersected_light_indices_in_tex.Load(int4(tile_id.xy * 32 + Get2DOffset(offset), tile_id.z, 0));
+}
+
+void WriteALightIndex(uint3 tile_id, uint offset, uint index)
+{
+	intersected_light_indices_rw_tex[uint3(tile_id.xy * 32 + Get2DOffset(offset), tile_id.z)] = index;
+}
+
+groupshared uint num_intersected_lights_sh;
+groupshared float4 planes_sh[6];
+groupshared bool empty_frustum_sh;
+groupshared uint intersected_lights_sh[LIGHT_BATCH];
+
+void ScanIntersectedLight(uint GI)
+{
+	uint sum = 0;
+	for (uint b = 0; b < LIGHT_BATCH / BLOCK_SIZE; ++ b)
+	{
+		uint index = b * BLOCK_SIZE + GI;
+		uint val = intersected_lights_sh[index] & 1;
+		uint start_addr = ScanBlock(false, GI, val) + sum;
+		if (val)
+		{
+			intersected_lights_sh[start_addr] |= index << 16;
+		}
+
+		uint num = start_addr + val;
+		if (BLOCK_SIZE - 1 == GI)
+		{
+			num_intersected_lights_sh = num;
+		}
+		GroupMemoryBarrierWithGroupSync();
+
+		intersected_lights_sh[index] &= ~1;
+		intersected_lights_sh[index] |= num;
+
+		sum = num_intersected_lights_sh;
+		GroupMemoryBarrierWithGroupSync();
+	}
+}
+
+[numthreads(BLOCK_X, BLOCK_Y, 1)]
+void ClusteredDRLightIntersectionCS(uint3 gid : SV_GroupID,
+							uint3 gtid : SV_GroupThreadID,
+							uint GI : SV_GroupIndex)
+{
+	if (0 == GI)
+	{
+		num_intersected_lights_sh = 0;
+
+		float2 tile_min_max = min_max_depth_tex.Load(uint3(gid.xy, 0)).xy;
+		empty_frustum_sh = (tile_min_max.x > depth_slices[gid.z + 1]) || (tile_min_max.y <= depth_slices[gid.z]);
+		[branch]
+		if (!empty_frustum_sh)
+		{
+			float2 min_max = float2(max(depth_slices[gid.z], tile_min_max.x), min(depth_slices[gid.z + 1], tile_min_max.y));
+			CalcTileViewFrustum(gid.xy, min_max, planes_sh);
+		}
+	}
+	GroupMemoryBarrierWithGroupSync();
+
+	[branch]
+	if (empty_frustum_sh)
+	{
+		if (GI < 8)
+		{
+			lights_start_rw_tex[uint3(gid.x * 8 + GI, gid.yz)] = 0;
+		}
+
+		return;
+	}
+
+	float4 planes[6];
+	for (uint i = 0; i < 6; ++ i)
+	{
+		planes[i] = planes_sh[i];
+	}
+
+	uint index;
+	for (index = GI; index < lights_type[3]; index += BLOCK_SIZE)
+	{
+		intersected_lights_sh[index] = 0;
+	}
+	for (index = lights_type[3] + GI; index < lights_type[5]; index += BLOCK_SIZE)
+	{
+		intersected_lights_sh[index] = OverlapTestPoint(planes, index);
+	}
+	for (index = lights_type[5] + GI; index < lights_type[7]; index += BLOCK_SIZE)
+	{
+		intersected_lights_sh[index] = OverlapTestSpot(planes, index);
+	}
+	for (index = lights_type[7] + GI; index < lights_type[11]; index += BLOCK_SIZE)
+	{
+		intersected_lights_sh[index] = OverlapTestPoint(planes, index);
+	}
+	for (index = lights_type[11] + GI; index < LIGHT_BATCH; index += BLOCK_SIZE)
+	{
+		intersected_lights_sh[index] = 0;
+	}
+	GroupMemoryBarrierWithGroupSync();
+
+	ScanIntersectedLight(GI);
+
+	if (GI < 8)
+	{
+		index = lights_type[GI + 4] - 1;
+		lights_start_rw_tex[uint3(gid.x * 8 + GI, gid.yz)] = intersected_lights_sh[index] & 0xFFFF;
+	}
+
+	for (uint b = 0; b < LIGHT_BATCH / BLOCK_SIZE; ++ b)
+	{
+		index = b * BLOCK_SIZE + GI;
+		if (index < num_intersected_lights_sh)
+		{
+			WriteALightIndex(gid, index, intersected_lights_sh[index] >> 16);
+		}
+	}
+}
+
+uint CalcDepthSlice(float depth)
+{
+	// Must match depth_slices calculation in DeferredRenderingLayer::UpdateClusteredLighting
+	return (depth < depth_slices_shading.x) ? 0 :
+		max(1, uint((log(depth) - depth_slices_shading.y) / depth_slices_shading.z * NUM_DEPTH_SLICES));
+}
+
+bool LightingMask(uint2 coord, uint sample_index)
+{
+#if KLAYGE_EXPLICIT_MULTI_SAMPLE_SUPPORT && MULTI_SAMPLE_INPUT	
+	uint stecnil = g_buffer_stencil_tex_ms.Load(coord, sample_index).y;
+#else
+	uint stecnil = g_buffer_stencil_tex.Load(int3(coord, 0)).y;
+#endif
+
+	const uint TRANSPARENT_FLAG = 16;
+	const uint NO_LIGHT_FLAG = 128;
+
+	return ((stecnil & (TRANSPARENT_FLAG | NO_LIGHT_FLAG)) == 0);
+}
+
+groupshared uint intersected_light_indices_sh[NUM_DEPTH_SLICES][LIGHT_BATCH / 2];
+groupshared	uint light_start_sh[NUM_DEPTH_SLICES][8];
+
+float4 ClusteredDRUnifiedSample(uint3 tile_id, uint3 coord, uint sample_index)
+{
+	float4 shading;
+	[branch]
+	if (LightingMask(coord.xy, sample_index))
+	{
+		float2 tc = (coord.xy + 0.5f) * inv_width_height;
+
+#if KLAYGE_EXPLICIT_MULTI_SAMPLE_SUPPORT && MULTI_SAMPLE_INPUT
+		float4 rt0 = g_buffer_rt0_tex_ms.Load(coord.xy, sample_index);
+		float4 rt1 = g_buffer_rt1_tex_ms.Load(coord.xy, sample_index);
+		float4 rt2 = g_buffer_rt2_tex_ms.Load(coord.xy, sample_index);
+		float depth = g_buffer_depth_tex_ms.Load(coord.xy, sample_index).x;
+#else
+		float4 rt0 = g_buffer_rt0_tex.Load(coord);
+		float4 rt1 = g_buffer_rt1_tex.Load(coord);
+		float4 rt2 = g_buffer_rt2_tex.Load(coord);
+		float depth = depth_tex.Load(coord).x;
+#endif
+		float3 view_dir = -normalize(texcoord_to_view(tc));
+		float3 normal = GetNormal(rt0);
+		float glossiness = GetGlossiness(rt0);
+		float shininess = Glossiness2Shininess(glossiness);
+		float3 pos_es = view_dir * (depth / view_dir.z);
+		float3 c_diff = GetDiffuse(rt1);
+		float3 c_spec = GetSpecular(rt1);
+		float occlusion = GetOcclusion(rt2);
+
+		tile_id.z = CalcDepthSlice(pos_es.z);
+
+		float spec_normalize = SpecularNormalizeFactor(shininess);
+
+		shading = float4(0, 0, 0, 1);
+
+		uint i = lights_type[0];
+		for (; i < lights_type[1]; ++ i)
+		{
+			float3 light_dir = lights_dir_es[i].xyz;
+			float n_dot_l = 0.5f + 0.5f * dot(light_dir, normal);
+			float3 halfway = normalize(light_dir + view_dir);
+			shading.rgb += max(c_diff * lights_attrib[i].x * n_dot_l, 0) * lights_color[i].rgb;
+		}
+		for (; i < lights_type[2]; ++ i)
+		{
+			shading.rgb += CalcClusteredDRShading(i, -1, lights_dir_es[i].xyz, normal, view_dir, -1,
+				c_diff, c_spec, spec_normalize, shininess, tc, 1);
+		}
+		for (; i < lights_type[3]; ++ i)
+		{
+			shading.rgb += CalcClusteredDRShading(i, int(lights_attrib[0].z), lights_dir_es[i].xyz, normal, view_dir, -1,
+				c_diff, c_spec, spec_normalize, shininess, tc, 1);
+		}
+
+		i = 0;
+		for (; i < light_start_sh[tile_id.z][0]; ++ i)
+		{
+			uint li = (intersected_light_indices_sh[tile_id.z][i / 2] >> ((i & 1) * 16)) & 0xFFFF;
+			shading.rgb += CalcClusteredDRPoint(li, -1,
+				pos_es, normal, view_dir, c_diff, c_spec, spec_normalize, shininess, tc);
+		}
+		for (; i < light_start_sh[tile_id.z][1]; ++ i)
+		{
+			uint li = (intersected_light_indices_sh[tile_id.z][i / 2] >> ((i & 1) * 16)) & 0xFFFF;
+			shading.rgb += CalcClusteredDRPoint(li, int(lights_attrib[li].z),
+				pos_es, normal, view_dir, c_diff, c_spec, spec_normalize, shininess, tc);
+		}
+		for (; i < light_start_sh[tile_id.z][2]; ++ i)
+		{
+			uint li = (intersected_light_indices_sh[tile_id.z][i / 2] >> ((i & 1) * 16)) & 0xFFFF;
+			shading.rgb += CalcClusteredDRSpot(li, -1,
+				pos_es, normal, view_dir, c_diff, c_spec, spec_normalize, shininess, tc);
+		}
+		for (; i < light_start_sh[tile_id.z][3]; ++ i)
+		{
+			uint li = (intersected_light_indices_sh[tile_id.z][i / 2] >> ((i & 1) * 16)) & 0xFFFF;
+			shading.rgb += CalcClusteredDRSpot(li, int(lights_attrib[li].z),
+				pos_es, normal, view_dir, c_diff, c_spec, spec_normalize, shininess, tc);
+		}
+		for (; i < light_start_sh[tile_id.z][4]; ++ i)
+		{
+			uint li = (intersected_light_indices_sh[tile_id.z][i / 2] >> ((i & 1) * 16)) & 0xFFFF;
+			shading.rgb += CalcClusteredDRSphereArea(li, -1,
+				pos_es, normal, view_dir, c_diff, c_spec, spec_normalize, shininess, tc);
+		}
+		for (; i < light_start_sh[tile_id.z][5]; ++ i)
+		{
+			uint li = (intersected_light_indices_sh[tile_id.z][i / 2] >> ((i & 1) * 16)) & 0xFFFF;
+			shading.rgb += CalcClusteredDRSphereArea(li, int(lights_attrib[li].z),
+				pos_es, normal, view_dir, c_diff, c_spec, spec_normalize, shininess, tc);
+		}
+		for (; i < light_start_sh[tile_id.z][6]; ++ i)
+		{
+			uint li = (intersected_light_indices_sh[tile_id.z][i / 2] >> ((i & 1) * 16)) & 0xFFFF;
+			shading.rgb += CalcClusteredDRTubeArea(li, -1,
+				pos_es, normal, view_dir, c_diff, c_spec, spec_normalize, shininess, tc);
+		}
+		for (; i < light_start_sh[tile_id.z][7]; ++ i)
+		{
+			uint li = (intersected_light_indices_sh[tile_id.z][i / 2] >> ((i & 1) * 16)) & 0xFFFF;
+			shading.rgb += CalcClusteredDRTubeArea(li, int(lights_attrib[li].z),
+				pos_es, normal, view_dir, c_diff, c_spec, spec_normalize, shininess, tc);
+		}
+
+		[branch]
+		if (lights_type[0] == lights_type[1])
+		{
+#if USE_TYPED_UAV
+#if KLAYGE_TYPED_UAV_SUPPORT
+#if KLAYGE_EXPLICIT_MULTI_SAMPLE_SUPPORT && MULTI_SAMPLE_INPUT
+			shading += shading_rw_tex_array[uint3(coord.xy, sample_index)];
+#else
+			shading += shading_rw_tex[coord.xy];
+#endif		
+#endif
+#else
+#if KLAYGE_EXPLICIT_MULTI_SAMPLE_SUPPORT && MULTI_SAMPLE_INPUT
+			shading += shading_in_tex_ms.Load(coord.xy, sample_index);
+#else
+			shading += shading_in_tex.Load(coord);
+#endif
+#endif
+		}
+		else
+		{
+			shading += SkylightShading(glossiness, c_diff, c_spec, normal, view_dir);
+		}
+		
+		shading *= float4(occlusion.xxx, 1);
+	}
+	else
+	{
+#if KLAYGE_EXPLICIT_MULTI_SAMPLE_SUPPORT && MULTI_SAMPLE_INPUT
+		shading = g_buffer_rt1_tex_ms.Load(coord.xy, sample_index);
+#else
+		shading = g_buffer_rt1_tex.Load(coord);
+#endif
+	}
+
+	return shading;
+}
+
+[numthreads(BLOCK_X, BLOCK_Y, 1)]
+void ClusteredDRUnifiedCS(uint3 gid : SV_GroupID,
+							uint3 gtid : SV_GroupThreadID,
+							uint GI : SV_GroupIndex)
+{
+	uint3 tile_id = uint3(gid.xy / uint2(TILE_SIZE / BLOCK_X, TILE_SIZE / BLOCK_Y), 0);
+
+	if (GI < 8 * NUM_DEPTH_SLICES)
+	{
+		uint slice = GI / 8;
+		uint offset = GI - slice * 8;
+		light_start_sh[slice][offset] = lights_start_in_tex.Load(uint4(tile_id.x * 8 + offset, tile_id.y, slice, 0));
+	}
+	GroupMemoryBarrierWithGroupSync();
+
+	for (uint s = 0; s < NUM_DEPTH_SLICES; ++ s)
+	{
+		for (uint i = GI; i < (light_start_sh[s][7] + 1) / 2; i += BLOCK_SIZE)
+		{
+			uint combined = ReadALightIndex(uint3(tile_id.xy, s), i * 2 + 0);
+			if (i * 2 + 1 < light_start_sh[s][7])
+			{
+				combined |= (ReadALightIndex(uint3(tile_id.xy, s), i * 2 + 1) << 16);
+			}
+			intersected_light_indices_sh[s][i] = combined;
+		}
+	}
+	GroupMemoryBarrierWithGroupSync();
+
+	uint3 coord = uint3(gid.xy * uint2(BLOCK_X, BLOCK_Y) + gtid.xy, 0);
+	
+#if KLAYGE_EXPLICIT_MULTI_SAMPLE_SUPPORT && MULTI_SAMPLE_INPUT
+	uint width, height, samples;
+	g_buffer_rt0_tex_ms.GetDimensions(width, height, samples);
+#endif
+
+	[branch]
+	if (all(coord.xy < width_height))
+	{
+		float4 shading = ClusteredDRUnifiedSample(tile_id, coord, 0);
+#if KLAYGE_EXPLICIT_MULTI_SAMPLE_SUPPORT && MULTI_SAMPLE_INPUT
+		shading_rw_tex_array[uint3(coord.xy, 0)] = shading;
+		[branch]
+		if (multi_sample_mask_tex.Load(coord).x > 0.5f)
+		{
+			for (uint i = 1; i < samples; ++ i)
+			{
+				shading_rw_tex_array[uint3(coord.xy, i)] = ClusteredDRUnifiedSample(tile_id, coord, i);
+			}
+		}
+#else
+		shading_rw_tex[coord.xy] = shading;
+#endif
+	}
+}
+		]]>
+	</shader>
+
+	<technique name="ClusteredDRLightIntersection">
+		<pass name="p0">
+			<state name="compute_shader" value="ClusteredDRLightIntersectionCS()"/>
+		</pass>
+	</technique>
+
+	<technique name="ClusteredDRUnified">
+		<macro name="USE_TYPED_UAV" value="1"/>
+		<pass name="p0">
+			<state name="compute_shader" value="ClusteredDRUnifiedCS()"/>
+		</pass>
+	</technique>
+	<technique name="ClusteredDRUnifiedMS" inherit="ClusteredDRUnified">
+		<macro name="MULTI_SAMPLE_INPUT" value="1"/>
+	</technique>
+
+	<technique name="ClusteredDRUnifiedNoTypedUAV" inherit="ClusteredDRUnified">
+		<macro name="USE_TYPED_UAV" value="0"/>
+	</technique>
+	<technique name="ClusteredDRUnifiedNoTypedUAVMS" inherit="ClusteredDRUnifiedNoTypedUAV">
+		<macro name="MULTI_SAMPLE_INPUT" value="1"/>
+	</technique>
+
+
+	<macro name="MAX_NUM_SHADOWED_LIGHTS" value="5"/>
+
+	<parameter type="texture2D" name="min_max_depth_tex"/>
+	<parameter type="rw_texture2D" name="projective_shadowing_rw_tex"/>
+	<parameter type="rw_texture2D" elem_type="unorm float4" name="shadowing_rw_tex"/>
+	<cbuffer name="light_batch3">
+		<parameter type="float4x4" name="lights_view_proj" array_size="MAX_NUM_SHADOWED_LIGHTS"/>
+		<parameter type="int" name="filtered_shadow_maps_2d_light_index" array_size="MAX_NUM_SHADOWED_LIGHTS"/>
+		<parameter type="float" name="esms_scale_factor" array_size="MAX_NUM_SHADOWED_LIGHTS"/>
+	</cbuffer>
+
+	<shader type="compute_shader" version="5">
+		<![CDATA[		
+groupshared bool intersected_shadowing_lights_sh[MAX_NUM_SHADOWED_LIGHTS];
+groupshared float2 csm_tc_dd[BLOCK_Y][BLOCK_X];
+
+static const uint LT_Ambient = 0;
+static const uint LT_Directional = 1;
+static const uint LT_Point = 2;
+static const uint LT_Spot = 3;
+static const uint LT_SphereArea = 4;
+static const uint LT_TubeArea = 5;
+	
+bool ClusteredDRShadowingUnifiedSample(uint3 gtid, uint3 coord, uint sample_index,
+	out bool write_projective, out float4 projective_shadowing, out float4 shadowing)
+{
+	bool lighting_mask = LightingMask(coord.xy * 2, sample_index);
+
+#if KLAYGE_EXPLICIT_MULTI_SAMPLE_SUPPORT && MULTI_SAMPLE_INPUT
+	float depth = g_buffer_depth_tex_ms.Load(coord.xy * 2, sample_index).x;
+#else
+	float depth = depth_tex.Load(coord * 2).x;
+#endif
+
+	float2 tc = (coord.xy + 0.5f) * inv_width_height;
+
+	float3 view_dir = normalize(texcoord_to_view(tc));
+	float3 pos_es = view_dir * (depth / view_dir.z);
+
+	uint sun_index = MAX_NUM_SHADOWED_LIGHTS;
+	[unroll]
+	for (uint i = 0; i < MAX_NUM_SHADOWED_LIGHTS; ++ i)
+	{
+		if (intersected_shadowing_lights_sh[i] && (LT_Directional == lights_type[i]))
+		{
+			sun_index = i;
+			break;
+		}
+	}
+	float4 sun_tc_ddx_ddy = 0;
+	if (sun_index != MAX_NUM_SHADOWED_LIGHTS)
+	{
+		float2 light_proj_pos = mul(float4(pos_es, 1), lights_view_proj[sun_index]).xy;
+		light_proj_pos.y *= -1;
+		light_proj_pos = light_proj_pos * 0.5f + 0.5f;
+
+		csm_tc_dd[gtid.y][gtid.x] = light_proj_pos;
+		GroupMemoryBarrierWithGroupSync();
+
+		uint2 location = gtid.xy;
+		if (0 == gtid.x)
+		{
+			location.x = 1;
+		}
+		else if (BLOCK_X - 1 == gtid.x)
+		{
+			location.x = BLOCK_X - 2;
+		}
+		if (0 == gtid.y)
+		{
+			location.y = 1;
+		}
+		else if (BLOCK_Y - 1 == gtid.y)
+		{
+			location.y = BLOCK_Y - 2;
+		}
+		uint2 location_right_down = location + 1;
+		sun_tc_ddx_ddy = float4(csm_tc_dd[location.y][location_right_down.x], csm_tc_dd[location_right_down.y][location.x])
+			- csm_tc_dd[location.y][location.x].xyxy;
+	}
+	
+	bool ret = false;
+	write_projective = false;
+	projective_shadowing = 1;
+	shadowing = 1;
+
+	[branch]
+	if (all(coord.xy < width_height) && lighting_mask)
+	{
+		for (uint i = 0; i < MAX_NUM_SHADOWED_LIGHTS; ++ i)
+		{
+			[branch]
+			if (intersected_shadowing_lights_sh[i])
+			{
+				float4 new_shadowing;
+				if (LT_Directional == lights_type[i])
+				{
+					float len = dot(float4(pos_es, 1), view_z_to_light_view);
+					new_shadowing = ESMSun(pos_es, csm_tc_dd[gtid.y][gtid.x], sun_tc_ddx_ddy, len,
+						esms_scale_factor[i]);
+				}
+				else if (LT_Spot == lights_type[i])
+				{
+					float4 light_proj_pos = mul(float4(pos_es, 1), lights_view_proj[i]);
+					light_proj_pos /= light_proj_pos.w;
+					light_proj_pos.y *= KLAYGE_FLIPPING;
+					light_proj_pos.xy = light_proj_pos.xy * 0.5f + 0.5f;
+					float len = length(lights_pos_es[i].xyz - pos_es);
+					new_shadowing = ESMDirectional(pos_es, light_proj_pos.xy, len, lights_attrib[i].z > 0, lights_attrib[i].w > 0,
+						filtered_shadow_maps_2d_light_index[i], esms_scale_factor[i]);
+				}
+				else //if ((LT_Point == lights_type[i]) || (LT_SphereArea == lights_type[i]) || (LT_TubeArea == lights_type[i]))
+				{
+					float3 dir = lights_pos_es[i].xyz - pos_es;
+					float len = length(dir);
+					float3 dir_ls = mul(-dir, (float3x3)view_to_light_model);
+					new_shadowing = ESMOmnidirectional(dir_ls, len, lights_attrib[i].z > 0, lights_attrib[i].w > 0,
+						esms_scale_factor[i]);
+				}
+
+				if (0 == i)
+				{
+					shadowing.x = new_shadowing.x;
+				}
+				else if (1 == i)
+				{
+					shadowing.y = new_shadowing.y;
+				}
+				else if (2 == i)
+				{
+					shadowing.z = new_shadowing.z;
+				}
+				else if (3 == i)
+				{
+					shadowing.w = new_shadowing.w;
+				}
+				else if (4 == i)
+				{
+					projective_shadowing = new_shadowing;
+					write_projective = true;
+				}
+			}
+		}
+		
+		ret = true;
+	}
+	
+	return ret;
+}
+
+[numthreads(BLOCK_X, BLOCK_Y, 1)]
+void ClusteredDRShadowingUnifiedCS(uint3 gid : SV_GroupID,
+							uint3 gtid : SV_GroupThreadID,
+							uint GI : SV_GroupIndex)
+{			
+	float4 planes[6];
+	float2 min_max = min_max_depth_tex.Load(gid * 2).xy;
+	CalcTileViewFrustum(gid.xy * 2, min_max, planes);
+	
+	if (GI < MAX_NUM_SHADOWED_LIGHTS)
+	{
+		bool intersected = false;
+
+		if (LT_Directional == lights_type[GI])
+		{
+			intersected = true;
+		}
+		else if (LT_Spot == lights_type[GI])
+		{
+			intersected = OverlapTestSpot(planes, GI);
+		}
+		else //if ((LT_Point == lights_type[GI]) || (LT_SphereArea == lights_type[GI]) || (LT_TubeArea == lights_type[GI]))
+		{
+			intersected = OverlapTestPoint(planes, GI);
+		}
+		
+		intersected_shadowing_lights_sh[GI] = intersected;
+	}
+	GroupMemoryBarrierWithGroupSync();
+	
+#if KLAYGE_EXPLICIT_MULTI_SAMPLE_SUPPORT && MULTI_SAMPLE_INPUT
+	uint width, height, samples;
+	g_buffer_depth_tex_ms.GetDimensions(width, height, samples);
+#endif
+
+	uint2 tile_start = gid.xy * TILE_SIZE + gtid.xy;
+	for (uint tile_y = 0; tile_y < TILE_SIZE; tile_y += BLOCK_Y)
+	{
+		for (uint tile_x = 0; tile_x < TILE_SIZE; tile_x += BLOCK_X)
+		{
+			uint3 coord = uint3(tile_start + uint2(tile_x, tile_y), 0);
+			
+#if KLAYGE_EXPLICIT_MULTI_SAMPLE_SUPPORT && MULTI_SAMPLE_INPUT
+			bool has_write_projective = false;
+			float4 total_projective_shadowing = 0;
+			float4 total_shadowing = 0;
+			for (uint i = 0; i < samples; ++ i)
+			{
+				bool write_projective;
+				float4 projective_shadowing;
+				float4 shadowing;
+				[branch]
+				if (ClusteredDRShadowingUnifiedSample(gtid, coord, i,
+					write_projective, projective_shadowing, shadowing))
+				{
+					if (write_projective)
+					{
+						total_projective_shadowing += projective_shadowing;
+						has_write_projective = true;
+					}
+					total_shadowing += shadowing;
+				}
+			}
+
+			if (has_write_projective)
+			{
+				projective_shadowing_rw_tex[coord.xy] = total_projective_shadowing / samples;
+			}
+			shadowing_rw_tex[coord.xy] = total_shadowing / samples;
+#else
+			bool write_projective;
+			float4 projective_shadowing;
+			float4 shadowing;
+			[branch]
+			if (ClusteredDRShadowingUnifiedSample(gtid, coord, 0,
+				write_projective, projective_shadowing, shadowing))
+			{
+				if (write_projective)
+				{
+					projective_shadowing_rw_tex[coord.xy] = projective_shadowing;
+				}
+				shadowing_rw_tex[coord.xy] = shadowing;
+			}
+#endif
+		}
+	}
+}
+		]]>
+	</shader>
+
+	<technique name="ClusteredDRShadowingUnified">
+		<pass name="p0">
+			<state name="compute_shader" value="ClusteredDRShadowingUnifiedCS()"/>
+		</pass>
+	</technique>
+	<technique name="ClusteredDRShadowingUnifiedMS" inherit="ClusteredDRShadowingUnified">
+		<macro name="MULTI_SAMPLE_INPUT" value="1"/>
+	</technique>
+
+
+	<parameter type="texture2DArray" name="src_2d_tex_array"/>
+
+	<shader>
+		<![CDATA[
+float4 ArrayToMultiSamplePS(float2 texcoord : TEXCOORD0, uint sample_index : SV_SampleIndex) : SV_Target0
+{
+#if KLAYGE_EXPLICIT_MULTI_SAMPLE_SUPPORT
+	uint width, height, elements;
+	src_2d_tex_array.GetDimensions(width, height, elements);
+	int2 coord = texcoord * int2(width, height);
+	
+	if (multi_sample_mask_tex.Load(int3(coord, 0)).x < 0.5f)
+	{
+		sample_index = 0;
+	}
+
+	return src_2d_tex_array.Load(int4(coord, sample_index, 0));
+#else
+	return 0;
+#endif
+}
+		]]>
+	</shader>
+
+	<technique name="ArrayToMultiSample">
+		<pass name="p0">
+			<state name="depth_enable" value="false"/>
+			<state name="depth_write_mask" value="false"/>
+
+			<state name="cull_mode" value="front"/>
+
+			<state name="vertex_shader" value="PostProcessVS()"/>
+			<state name="pixel_shader" value="ArrayToMultiSamplePS()"/>
+		</pass>
+	</technique>
+</effect>

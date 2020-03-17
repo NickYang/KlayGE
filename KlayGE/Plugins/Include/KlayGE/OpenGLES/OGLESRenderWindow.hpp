@@ -16,17 +16,8 @@
 #pragma once
 
 #include <KlayGE/PreDeclare.hpp>
+#include <KlayGE/Signal.hpp>
 #include <KlayGE/OpenGLES/OGLESFrameBuffer.hpp>
-
-#ifdef KLAYGE_COMPILER_MSVC
-#pragma warning(push)
-#pragma warning(disable: 4512) // boost::iterators::function_output_iterator<T>::output_proxy doesn't have assignment operator
-#pragma warning(disable: 4913) // User defined binary operator ',' exists but no overload could convert all operands
-#endif
-#include <boost/signals2.hpp>
-#ifdef KLAYGE_COMPILER_MSVC
-#pragma warning(pop)
-#endif
 
 namespace KlayGE
 {
@@ -51,11 +42,11 @@ namespace KlayGE
 		void FullScreen(bool fs);
 
 		// Method for dealing with resize / move & 3d library
-		void WindowMovedOrResized(Window const & win);
+		void WindowMovedOrResized(Window const& win);
 
 	private:
-		void OnExitSizeMove(Window const & win);
-		void OnSize(Window const & win, bool active);
+		void OnExitSizeMove(Window const& win);
+		void OnSize(Window const& win, bool active);
 
 	private:
 		std::string	name_;
@@ -81,8 +72,8 @@ namespace KlayGE
 
 		std::wstring			description_;
 
-		boost::signals2::connection on_exit_size_move_connect_;
-		boost::signals2::connection on_size_connect_;
+		Signal::Connection on_exit_size_move_connect_;
+		Signal::Connection on_size_connect_;
 	};
 }
 

@@ -11,8 +11,6 @@ class ProceduralTexApp : public KlayGE::App3DFramework
 public:
 	ProceduralTexApp();
 
-	bool ConfirmDevice() const;
-
 private:
 	void OnCreate();
 	void OnResize(KlayGE::uint32_t width, KlayGE::uint32_t height);
@@ -25,11 +23,10 @@ private:
 	void FreqChangedHandler(KlayGE::UISlider const & sender);
 
 	KlayGE::FontPtr font_;
-	KlayGE::SceneObjectPtr polygon_;
+	KlayGE::RenderModelPtr polygon_model_;
 
 	KlayGE::TrackballCameraController tb_controller_;
 
-	KlayGE::SceneObjectPtr light_proxy_;
 	KlayGE::LightSourcePtr light_;
 
 	KlayGE::UIDialogPtr dialog_;

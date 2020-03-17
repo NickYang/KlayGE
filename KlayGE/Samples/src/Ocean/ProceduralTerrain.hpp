@@ -5,8 +5,7 @@
 
 #include <KlayGE/PreDeclare.hpp>
 
-#include <KlayGE/RenderableHelper.hpp>
-#include <KlayGE/SceneObjectHelper.hpp>
+#include <KlayGE/SceneNode.hpp>
 #include <KlayGE/InfTerrain.hpp>
 
 #include <vector>
@@ -18,13 +17,20 @@ namespace KlayGE
 	public:
 		ProceduralTerrain();
 
+		void ReflectionPlane(Plane const & plane);
+
+		void OnRenderBegin() override;
+
 	protected:
-		virtual void FlushTerrainData() KLAYGE_OVERRIDE;
+		virtual void FlushTerrainData() override;
 
 	private:
 		PostProcessPtr height_pp_;
 		PostProcessPtr gradient_pp_;
 		PostProcessPtr mask_pp_;
+		Plane reflection_plane_;
+
+		RenderEffectParameter* mvp_wo_oblique_param_;
 	};
 }
 

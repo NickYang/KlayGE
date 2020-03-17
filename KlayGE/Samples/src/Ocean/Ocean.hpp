@@ -11,8 +11,6 @@ class OceanApp : public KlayGE::App3DFramework
 public:
 	OceanApp();
 
-	bool ConfirmDevice() const;
-
 private:
 	void OnCreate();
 	void OnResize(KlayGE::uint32_t width, KlayGE::uint32_t height);
@@ -33,10 +31,7 @@ private:
 	void FPSCameraHandler(KlayGE::UICheckBox const & sender);
 
 	KlayGE::FontPtr font_;
-	KlayGE::SceneObjectPtr terrain_;
-	KlayGE::SceneObjectPtr ocean_;
-	KlayGE::SceneObjectPtr sky_box_;
-	KlayGE::SceneObjectPtr sun_flare_;
+	KlayGE::RenderableComponentPtr ocean_;
 	KlayGE::FirstPersonCameraController fpcController_;
 
 	KlayGE::DeferredRenderingLayer* deferred_rendering_;
@@ -45,6 +40,12 @@ private:
 
 	bool light_shaft_on_;
 	KlayGE::PostProcessPtr light_shaft_pp_;
+
+	KlayGE::TexturePtr reflection_tex_;
+	KlayGE::TexturePtr reflection_ds_tex_;
+	KlayGE::FrameBufferPtr reflection_fb_;
+
+	KlayGE::CameraPtr screen_camera_;
 
 	KlayGE::UIDialogPtr dialog_params_;
 	int id_dmap_dim_static_;
@@ -66,7 +67,7 @@ private:
 	int id_light_shaft_;
 	int id_fps_camera_;
 
-	KlayGE::DirectionalLightSourcePtr sun_light_;
+	KlayGE::LightSourcePtr sun_light_;
 };
 
-#endif		// _DEFERREDRENDERING_HPP
+#endif		// _OCEAN_HPP

@@ -29,7 +29,7 @@
  */
 
 #include <KlayGE/KlayGE.hpp>
-#include <KFL/ThrowErr.hpp>
+#include <KFL/ErrorHandling.hpp>
 #include <KFL/Util.hpp>
 #include <KFL/Math.hpp>
 #include <KlayGE/RenderFactory.hpp>
@@ -37,6 +37,7 @@
 #include <KlayGE/RenderEngine.hpp>
 #include <KlayGE/GraphicsBuffer.hpp>
 
+#include <system_error>
 #include <boost/assert.hpp>
 
 #include <KlayGE/D3D12/D3D12RenderEngine.hpp>
@@ -97,8 +98,7 @@ namespace KlayGE
 			return D3D12_COMPARISON_FUNC_GREATER;
 
 		default:
-			BOOST_ASSERT(false);
-			return D3D12_COMPARISON_FUNC_NEVER;
+			KFL_UNREACHABLE("Invalid compare function");
 		};
 	}
 
@@ -131,8 +131,7 @@ namespace KlayGE
 			return D3D12_STENCIL_OP_DECR;
 
 		default:
-			BOOST_ASSERT(false);
-			return D3D12_STENCIL_OP_KEEP;
+			KFL_UNREACHABLE("Invalid stencil operation");
 		};
 	}
 
@@ -192,8 +191,7 @@ namespace KlayGE
 			return D3D12_BLEND_INV_SRC1_COLOR;
 
 		default:
-			BOOST_ASSERT(false);
-			return D3D12_BLEND_ZERO;
+			KFL_UNREACHABLE("Invalid alpha blend factor");
 		}
 	}
 
@@ -211,8 +209,7 @@ namespace KlayGE
 			return D3D12_CULL_MODE_BACK;
 
 		default:
-			BOOST_ASSERT(false);
-			return D3D12_CULL_MODE_NONE;
+			KFL_UNREACHABLE("Invalid cull mode");
 		}
 	}
 
@@ -230,8 +227,7 @@ namespace KlayGE
 			return D3D12_FILL_MODE_SOLID;
 
 		default:
-			BOOST_ASSERT(false);
-			return D3D12_FILL_MODE_SOLID;
+			KFL_UNREACHABLE("Invalid polygon mode");
 		}
 	}
 
@@ -255,8 +251,7 @@ namespace KlayGE
 			return D3D12_BLEND_OP_MAX;
 
 		default:
-			BOOST_ASSERT(false);
-			return D3D12_BLEND_OP_ADD;
+			KFL_UNREACHABLE("Invalid blend operation");
 		}
 	}
 
@@ -277,8 +272,7 @@ namespace KlayGE
 			return D3D12_TEXTURE_ADDRESS_MODE_BORDER;
 
 		default:
-			BOOST_ASSERT(false);
-			return D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+			KFL_UNREACHABLE("Invalid texture addressing mode");
 		}
 	}
 
@@ -329,8 +323,7 @@ namespace KlayGE
 			return D3D12_FILTER_COMPARISON_ANISOTROPIC;
 
 		default:
-			BOOST_ASSERT(false);
-			return D3D12_FILTER_MIN_MAG_MIP_POINT;
+			KFL_UNREACHABLE("Invalid texture filter operation");
 		}
 	}
 
@@ -399,8 +392,7 @@ namespace KlayGE
 			return D3D12_LOGIC_OP_OR_INVERTED;
 
 		default:
-			BOOST_ASSERT(false);
-			return D3D12_LOGIC_OP_NOOP;
+			KFL_UNREACHABLE("Invalid logic operation");
 		}
 	}
 
@@ -409,131 +401,130 @@ namespace KlayGE
 		switch (tt)
 		{
 		case RenderLayout::TT_PointList:
-			return D3D11_PRIMITIVE_TOPOLOGY_POINTLIST;
+			return D3D_PRIMITIVE_TOPOLOGY_POINTLIST;
 
 		case RenderLayout::TT_LineList:
-			return D3D11_PRIMITIVE_TOPOLOGY_LINELIST;
+			return D3D_PRIMITIVE_TOPOLOGY_LINELIST;
 
 		case RenderLayout::TT_LineStrip:
-			return D3D11_PRIMITIVE_TOPOLOGY_LINESTRIP;
+			return D3D_PRIMITIVE_TOPOLOGY_LINESTRIP;
 
 		case RenderLayout::TT_TriangleList:
-			return D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+			return D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
 
 		case RenderLayout::TT_TriangleStrip:
-			return D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP;
+			return D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP;
 
 		case RenderLayout::TT_LineList_Adj:
-			return D3D11_PRIMITIVE_TOPOLOGY_LINELIST_ADJ;
+			return D3D_PRIMITIVE_TOPOLOGY_LINELIST_ADJ;
 
 		case RenderLayout::TT_LineStrip_Adj:
-			return D3D11_PRIMITIVE_TOPOLOGY_LINESTRIP_ADJ;
+			return D3D_PRIMITIVE_TOPOLOGY_LINESTRIP_ADJ;
 
 		case RenderLayout::TT_TriangleList_Adj:
-			return D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST_ADJ;
+			return D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST_ADJ;
 
 		case RenderLayout::TT_TriangleStrip_Adj:
-			return D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP_ADJ;
+			return D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP_ADJ;
 
 		case RenderLayout::TT_1_Ctrl_Pt_PatchList:
-			return D3D11_PRIMITIVE_TOPOLOGY_1_CONTROL_POINT_PATCHLIST;
+			return D3D_PRIMITIVE_TOPOLOGY_1_CONTROL_POINT_PATCHLIST;
 
 		case RenderLayout::TT_2_Ctrl_Pt_PatchList:
-			return D3D11_PRIMITIVE_TOPOLOGY_2_CONTROL_POINT_PATCHLIST;
+			return D3D_PRIMITIVE_TOPOLOGY_2_CONTROL_POINT_PATCHLIST;
 
 		case RenderLayout::TT_3_Ctrl_Pt_PatchList:
-			return D3D11_PRIMITIVE_TOPOLOGY_3_CONTROL_POINT_PATCHLIST;
+			return D3D_PRIMITIVE_TOPOLOGY_3_CONTROL_POINT_PATCHLIST;
 
 		case RenderLayout::TT_4_Ctrl_Pt_PatchList:
-			return D3D11_PRIMITIVE_TOPOLOGY_4_CONTROL_POINT_PATCHLIST;
+			return D3D_PRIMITIVE_TOPOLOGY_4_CONTROL_POINT_PATCHLIST;
 
 		case RenderLayout::TT_5_Ctrl_Pt_PatchList:
-			return D3D11_PRIMITIVE_TOPOLOGY_5_CONTROL_POINT_PATCHLIST;
+			return D3D_PRIMITIVE_TOPOLOGY_5_CONTROL_POINT_PATCHLIST;
 
 		case RenderLayout::TT_6_Ctrl_Pt_PatchList:
-			return D3D11_PRIMITIVE_TOPOLOGY_6_CONTROL_POINT_PATCHLIST;
+			return D3D_PRIMITIVE_TOPOLOGY_6_CONTROL_POINT_PATCHLIST;
 
 		case RenderLayout::TT_7_Ctrl_Pt_PatchList:
-			return D3D11_PRIMITIVE_TOPOLOGY_7_CONTROL_POINT_PATCHLIST;
+			return D3D_PRIMITIVE_TOPOLOGY_7_CONTROL_POINT_PATCHLIST;
 
 		case RenderLayout::TT_8_Ctrl_Pt_PatchList:
-			return D3D11_PRIMITIVE_TOPOLOGY_8_CONTROL_POINT_PATCHLIST;
+			return D3D_PRIMITIVE_TOPOLOGY_8_CONTROL_POINT_PATCHLIST;
 
 		case RenderLayout::TT_9_Ctrl_Pt_PatchList:
-			return D3D11_PRIMITIVE_TOPOLOGY_9_CONTROL_POINT_PATCHLIST;
+			return D3D_PRIMITIVE_TOPOLOGY_9_CONTROL_POINT_PATCHLIST;
 
 		case RenderLayout::TT_10_Ctrl_Pt_PatchList:
-			return D3D11_PRIMITIVE_TOPOLOGY_10_CONTROL_POINT_PATCHLIST;
+			return D3D_PRIMITIVE_TOPOLOGY_10_CONTROL_POINT_PATCHLIST;
 
 		case RenderLayout::TT_11_Ctrl_Pt_PatchList:
-			return D3D11_PRIMITIVE_TOPOLOGY_11_CONTROL_POINT_PATCHLIST;
+			return D3D_PRIMITIVE_TOPOLOGY_11_CONTROL_POINT_PATCHLIST;
 
 		case RenderLayout::TT_12_Ctrl_Pt_PatchList:
-			return D3D11_PRIMITIVE_TOPOLOGY_12_CONTROL_POINT_PATCHLIST;
+			return D3D_PRIMITIVE_TOPOLOGY_12_CONTROL_POINT_PATCHLIST;
 
 		case RenderLayout::TT_13_Ctrl_Pt_PatchList:
-			return D3D11_PRIMITIVE_TOPOLOGY_13_CONTROL_POINT_PATCHLIST;
+			return D3D_PRIMITIVE_TOPOLOGY_13_CONTROL_POINT_PATCHLIST;
 
 		case RenderLayout::TT_14_Ctrl_Pt_PatchList:
-			return D3D11_PRIMITIVE_TOPOLOGY_14_CONTROL_POINT_PATCHLIST;
+			return D3D_PRIMITIVE_TOPOLOGY_14_CONTROL_POINT_PATCHLIST;
 
 		case RenderLayout::TT_15_Ctrl_Pt_PatchList:
-			return D3D11_PRIMITIVE_TOPOLOGY_15_CONTROL_POINT_PATCHLIST;
+			return D3D_PRIMITIVE_TOPOLOGY_15_CONTROL_POINT_PATCHLIST;
 
 		case RenderLayout::TT_16_Ctrl_Pt_PatchList:
-			return D3D11_PRIMITIVE_TOPOLOGY_16_CONTROL_POINT_PATCHLIST;
+			return D3D_PRIMITIVE_TOPOLOGY_16_CONTROL_POINT_PATCHLIST;
 
 		case RenderLayout::TT_17_Ctrl_Pt_PatchList:
-			return D3D11_PRIMITIVE_TOPOLOGY_17_CONTROL_POINT_PATCHLIST;
+			return D3D_PRIMITIVE_TOPOLOGY_17_CONTROL_POINT_PATCHLIST;
 
 		case RenderLayout::TT_18_Ctrl_Pt_PatchList:
-			return D3D11_PRIMITIVE_TOPOLOGY_18_CONTROL_POINT_PATCHLIST;
+			return D3D_PRIMITIVE_TOPOLOGY_18_CONTROL_POINT_PATCHLIST;
 
 		case RenderLayout::TT_19_Ctrl_Pt_PatchList:
-			return D3D11_PRIMITIVE_TOPOLOGY_19_CONTROL_POINT_PATCHLIST;
+			return D3D_PRIMITIVE_TOPOLOGY_19_CONTROL_POINT_PATCHLIST;
 
 		case RenderLayout::TT_20_Ctrl_Pt_PatchList:
-			return D3D11_PRIMITIVE_TOPOLOGY_20_CONTROL_POINT_PATCHLIST;
+			return D3D_PRIMITIVE_TOPOLOGY_20_CONTROL_POINT_PATCHLIST;
 
 		case RenderLayout::TT_21_Ctrl_Pt_PatchList:
-			return D3D11_PRIMITIVE_TOPOLOGY_21_CONTROL_POINT_PATCHLIST;
+			return D3D_PRIMITIVE_TOPOLOGY_21_CONTROL_POINT_PATCHLIST;
 
 		case RenderLayout::TT_22_Ctrl_Pt_PatchList:
-			return D3D11_PRIMITIVE_TOPOLOGY_22_CONTROL_POINT_PATCHLIST;
+			return D3D_PRIMITIVE_TOPOLOGY_22_CONTROL_POINT_PATCHLIST;
 
 		case RenderLayout::TT_23_Ctrl_Pt_PatchList:
-			return D3D11_PRIMITIVE_TOPOLOGY_23_CONTROL_POINT_PATCHLIST;
+			return D3D_PRIMITIVE_TOPOLOGY_23_CONTROL_POINT_PATCHLIST;
 
 		case RenderLayout::TT_24_Ctrl_Pt_PatchList:
-			return D3D11_PRIMITIVE_TOPOLOGY_24_CONTROL_POINT_PATCHLIST;
+			return D3D_PRIMITIVE_TOPOLOGY_24_CONTROL_POINT_PATCHLIST;
 
 		case RenderLayout::TT_25_Ctrl_Pt_PatchList:
-			return D3D11_PRIMITIVE_TOPOLOGY_25_CONTROL_POINT_PATCHLIST;
+			return D3D_PRIMITIVE_TOPOLOGY_25_CONTROL_POINT_PATCHLIST;
 
 		case RenderLayout::TT_26_Ctrl_Pt_PatchList:
-			return D3D11_PRIMITIVE_TOPOLOGY_26_CONTROL_POINT_PATCHLIST;
+			return D3D_PRIMITIVE_TOPOLOGY_26_CONTROL_POINT_PATCHLIST;
 
 		case RenderLayout::TT_27_Ctrl_Pt_PatchList:
-			return D3D11_PRIMITIVE_TOPOLOGY_27_CONTROL_POINT_PATCHLIST;
+			return D3D_PRIMITIVE_TOPOLOGY_27_CONTROL_POINT_PATCHLIST;
 
 		case RenderLayout::TT_28_Ctrl_Pt_PatchList:
-			return D3D11_PRIMITIVE_TOPOLOGY_28_CONTROL_POINT_PATCHLIST;
+			return D3D_PRIMITIVE_TOPOLOGY_28_CONTROL_POINT_PATCHLIST;
 
 		case RenderLayout::TT_29_Ctrl_Pt_PatchList:
-			return D3D11_PRIMITIVE_TOPOLOGY_29_CONTROL_POINT_PATCHLIST;
+			return D3D_PRIMITIVE_TOPOLOGY_29_CONTROL_POINT_PATCHLIST;
 
 		case RenderLayout::TT_30_Ctrl_Pt_PatchList:
-			return D3D11_PRIMITIVE_TOPOLOGY_30_CONTROL_POINT_PATCHLIST;
+			return D3D_PRIMITIVE_TOPOLOGY_30_CONTROL_POINT_PATCHLIST;
 
 		case RenderLayout::TT_31_Ctrl_Pt_PatchList:
-			return D3D11_PRIMITIVE_TOPOLOGY_31_CONTROL_POINT_PATCHLIST;
+			return D3D_PRIMITIVE_TOPOLOGY_31_CONTROL_POINT_PATCHLIST;
 
 		case RenderLayout::TT_32_Ctrl_Pt_PatchList:
-			return D3D11_PRIMITIVE_TOPOLOGY_32_CONTROL_POINT_PATCHLIST;
+			return D3D_PRIMITIVE_TOPOLOGY_32_CONTROL_POINT_PATCHLIST;
 
 		default:
-			BOOST_ASSERT(false);
-			return D3D11_PRIMITIVE_TOPOLOGY_POINTLIST;
+			KFL_UNREACHABLE("Invalid topology type");
 		}
 	}
 
@@ -591,19 +582,19 @@ namespace KlayGE
 			return D3D12_PRIMITIVE_TOPOLOGY_TYPE_PATCH;
 
 		default:
-			BOOST_ASSERT(false);
-			return D3D12_PRIMITIVE_TOPOLOGY_TYPE_UNDEFINED;
+			KFL_UNREACHABLE("Invalid topology type");
 		}
 	}
 
-	void D3D12Mapping::Mapping(std::vector<D3D12_INPUT_ELEMENT_DESC>& elements, size_t stream, vertex_elements_type const & vet, RenderLayout::stream_type type, uint32_t freq)
+	void D3D12Mapping::Mapping(std::vector<D3D12_INPUT_ELEMENT_DESC>& elements, size_t stream, std::span<VertexElement const> vet,
+		RenderLayout::stream_type type, uint32_t freq)
 	{
 		elements.resize(vet.size());
 
 		uint16_t elem_offset = 0;
-		for (uint32_t i = 0; i < elements.size(); ++i)
+		for (uint32_t i = 0; i < elements.size(); ++ i)
 		{
-			vertex_element const & vs_elem = vet[i];
+			VertexElement const & vs_elem = vet[i];
 
 			D3D12_INPUT_ELEMENT_DESC& element = elements[i];
 			element.SemanticIndex = vs_elem.usage_index;
@@ -677,7 +668,7 @@ namespace KlayGE
 		}
 	}
 
-	D3D12_SO_DECLARATION_ENTRY D3D12Mapping::Mapping(ShaderDesc::StreamOutputDecl const & decl, uint8_t slot)
+	D3D12_SO_DECLARATION_ENTRY D3D12Mapping::Mapping(ShaderDesc::StreamOutputDecl const & decl)
 	{
 		D3D12_SO_DECLARATION_ENTRY ret;
 
@@ -685,7 +676,7 @@ namespace KlayGE
 		ret.SemanticIndex = decl.usage_index;
 		ret.StartComponent = decl.start_component;
 		ret.ComponentCount = decl.component_count;
-		ret.OutputSlot = slot;
+		ret.OutputSlot = decl.slot;
 		switch (decl.usage)
 		{
 		// Vertex xyzs
@@ -919,6 +910,9 @@ namespace KlayGE
 		case EF_D24S8:
 			return DXGI_FORMAT_D24_UNORM_S8_UINT;
 
+		case EF_X24G8:
+			return DXGI_FORMAT_X24_TYPELESS_G8_UINT;
+
 		case EF_D32F:
 			return DXGI_FORMAT_D32_FLOAT;
 			
@@ -941,7 +935,7 @@ namespace KlayGE
 			return DXGI_FORMAT_BC7_UNORM_SRGB;
 
 		default:
-			THR(errc::function_not_supported);
+			KFL_UNREACHABLE("Invalid format");
 		}
 	}
 
@@ -1129,6 +1123,9 @@ namespace KlayGE
 		case DXGI_FORMAT_D24_UNORM_S8_UINT:
 			return EF_D24S8;
 
+		case DXGI_FORMAT_X24_TYPELESS_G8_UINT:
+			return EF_X24G8;
+
 		case DXGI_FORMAT_D32_FLOAT:
 			return EF_D32F;
 
@@ -1151,7 +1148,7 @@ namespace KlayGE
 			return EF_BC7_SRGB;
 
 		default:
-			THR(errc::function_not_supported);
+			KFL_UNREACHABLE("Invalid format");
 		}
 	}
 }

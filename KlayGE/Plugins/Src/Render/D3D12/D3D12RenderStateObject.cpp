@@ -29,98 +29,157 @@
  */
 
 #include <KlayGE/KlayGE.hpp>
-#include <KFL/ThrowErr.hpp>
+#include <KFL/ErrorHandling.hpp>
 #include <KFL/Util.hpp>
-#include <KFL/COMPtr.hpp>
 #include <KFL/Math.hpp>
 #include <KlayGE/Context.hpp>
 #include <KlayGE/RenderFactory.hpp>
+#include <KlayGE/FrameBuffer.hpp>
+#include <KFL/Hash.hpp>
 
+#include <iterator>
 #include <limits>
 
 #include <KlayGE/D3D12/D3D12RenderEngine.hpp>
 #include <KlayGE/D3D12/D3D12Mapping.hpp>
+#include <KlayGE/D3D12/D3D12RenderLayout.hpp>
+#include <KlayGE/D3D12/D3D12ShaderObject.hpp>
+#include <KlayGE/D3D12/D3D12FrameBuffer.hpp>
 #include <KlayGE/D3D12/D3D12RenderStateObject.hpp>
 
 namespace KlayGE
 {
-	D3D12RasterizerStateObject::D3D12RasterizerStateObject(RasterizerStateDesc const & desc)
-		: RasterizerStateObject(desc)
+	D3D12RenderStateObject::D3D12RenderStateObject(RasterizerStateDesc const & rs_desc, DepthStencilStateDesc const & dss_desc,
+			BlendStateDesc const & bs_desc)
+		: RenderStateObject(rs_desc, dss_desc, bs_desc)
 	{
-		rasterizer_desc_.FillMode = D3D12Mapping::Mapping(desc.polygon_mode);
-		rasterizer_desc_.CullMode = D3D12Mapping::Mapping(desc.cull_mode);
-		rasterizer_desc_.FrontCounterClockwise = desc.front_face_ccw;
-		rasterizer_desc_.DepthBias = static_cast<int>(desc.polygon_offset_units);
-		rasterizer_desc_.DepthBiasClamp = desc.polygon_offset_units;
-		rasterizer_desc_.SlopeScaledDepthBias = desc.polygon_offset_factor;
-		rasterizer_desc_.DepthClipEnable = desc.depth_clip_enable;
-		rasterizer_desc_.MultisampleEnable = desc.multisample_enable;
-		rasterizer_desc_.AntialiasedLineEnable = false;
-		rasterizer_desc_.ForcedSampleCount = 0;
-		rasterizer_desc_.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
-	}
-
-	void D3D12RasterizerStateObject::Active()
-	{
-	}
-
-	D3D12DepthStencilStateObject::D3D12DepthStencilStateObject(DepthStencilStateDesc const & desc)
-		: DepthStencilStateObject(desc)
-	{
-		depth_stencil_desc_.DepthEnable = desc.depth_enable;
-		depth_stencil_desc_.DepthWriteMask = D3D12Mapping::Mapping(desc.depth_write_mask);
-		depth_stencil_desc_.DepthFunc = D3D12Mapping::Mapping(desc.depth_func);
-		depth_stencil_desc_.StencilEnable = desc.front_stencil_enable;
-		depth_stencil_desc_.StencilReadMask = static_cast<uint8_t>(desc.front_stencil_read_mask);
-		depth_stencil_desc_.StencilWriteMask = static_cast<uint8_t>(desc.front_stencil_write_mask);
-		depth_stencil_desc_.FrontFace.StencilFailOp = D3D12Mapping::Mapping(desc.front_stencil_fail);
-		depth_stencil_desc_.FrontFace.StencilDepthFailOp = D3D12Mapping::Mapping(desc.front_stencil_depth_fail);
-		depth_stencil_desc_.FrontFace.StencilPassOp = D3D12Mapping::Mapping(desc.front_stencil_pass);
-		depth_stencil_desc_.FrontFace.StencilFunc = D3D12Mapping::Mapping(desc.front_stencil_func);
-		depth_stencil_desc_.BackFace.StencilFailOp = D3D12Mapping::Mapping(desc.back_stencil_fail);
-		depth_stencil_desc_.BackFace.StencilDepthFailOp = D3D12Mapping::Mapping(desc.back_stencil_depth_fail);
-		depth_stencil_desc_.BackFace.StencilPassOp = D3D12Mapping::Mapping(desc.back_stencil_pass);
-		depth_stencil_desc_.BackFace.StencilFunc = D3D12Mapping::Mapping(desc.back_stencil_func);
-	}
-
-	void D3D12DepthStencilStateObject::Active(uint16_t front_stencil_ref, uint16_t /*back_stencil_ref*/)
-	{
-		D3D12RenderEngine& re = *checked_cast<D3D12RenderEngine*>(&Context::Instance().RenderFactoryInstance().RenderEngineInstance());
-		re.OMSetStencilRef(front_stencil_ref);
-	}
-
-	D3D12BlendStateObject::D3D12BlendStateObject(BlendStateDesc const & desc)
-		: BlendStateObject(desc)
-	{
-		D3D12RenderEngine& re = *checked_cast<D3D12RenderEngine*>(&Context::Instance().RenderFactoryInstance().RenderEngineInstance());
+		auto const& re = checked_cast<D3D12RenderEngine const&>(Context::Instance().RenderFactoryInstance().RenderEngineInstance());
 		RenderDeviceCaps const & caps = re.DeviceCaps();
 
-		blend_desc_.AlphaToCoverageEnable = desc.alpha_to_coverage_enable;
-		blend_desc_.IndependentBlendEnable = desc.independent_blend_enable;
-		for (int i = 0; i < 8; ++i)
+		D3D12_GRAPHICS_PIPELINE_STATE_DESC& graphics_ps_desc = ps_desc_.graphics_ps_desc;
+
+		graphics_ps_desc.RasterizerState.FillMode = D3D12Mapping::Mapping(rs_desc.polygon_mode);
+		graphics_ps_desc.RasterizerState.CullMode = D3D12Mapping::Mapping(rs_desc.cull_mode);
+		graphics_ps_desc.RasterizerState.FrontCounterClockwise = rs_desc.front_face_ccw;
+		graphics_ps_desc.RasterizerState.DepthBias = static_cast<int>(rs_desc.polygon_offset_units);
+		graphics_ps_desc.RasterizerState.DepthBiasClamp = rs_desc.polygon_offset_units;
+		graphics_ps_desc.RasterizerState.SlopeScaledDepthBias = rs_desc.polygon_offset_factor;
+		graphics_ps_desc.RasterizerState.DepthClipEnable = rs_desc.depth_clip_enable;
+		graphics_ps_desc.RasterizerState.MultisampleEnable = rs_desc.multisample_enable;
+		graphics_ps_desc.RasterizerState.AntialiasedLineEnable = false;
+		graphics_ps_desc.RasterizerState.ForcedSampleCount = 0;
+		graphics_ps_desc.RasterizerState.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
+
+		graphics_ps_desc.DepthStencilState.DepthEnable = dss_desc.depth_enable;
+		graphics_ps_desc.DepthStencilState.DepthWriteMask = D3D12Mapping::Mapping(dss_desc.depth_write_mask);
+		graphics_ps_desc.DepthStencilState.DepthFunc = D3D12Mapping::Mapping(dss_desc.depth_func);
+		graphics_ps_desc.DepthStencilState.StencilEnable = dss_desc.front_stencil_enable;
+		graphics_ps_desc.DepthStencilState.StencilReadMask = static_cast<uint8_t>(dss_desc.front_stencil_read_mask);
+		graphics_ps_desc.DepthStencilState.StencilWriteMask = static_cast<uint8_t>(dss_desc.front_stencil_write_mask);
+		graphics_ps_desc.DepthStencilState.FrontFace.StencilFailOp = D3D12Mapping::Mapping(dss_desc.front_stencil_fail);
+		graphics_ps_desc.DepthStencilState.FrontFace.StencilDepthFailOp = D3D12Mapping::Mapping(dss_desc.front_stencil_depth_fail);
+		graphics_ps_desc.DepthStencilState.FrontFace.StencilPassOp = D3D12Mapping::Mapping(dss_desc.front_stencil_pass);
+		graphics_ps_desc.DepthStencilState.FrontFace.StencilFunc = D3D12Mapping::Mapping(dss_desc.front_stencil_func);
+		graphics_ps_desc.DepthStencilState.BackFace.StencilFailOp = D3D12Mapping::Mapping(dss_desc.back_stencil_fail);
+		graphics_ps_desc.DepthStencilState.BackFace.StencilDepthFailOp = D3D12Mapping::Mapping(dss_desc.back_stencil_depth_fail);
+		graphics_ps_desc.DepthStencilState.BackFace.StencilPassOp = D3D12Mapping::Mapping(dss_desc.back_stencil_pass);
+		graphics_ps_desc.DepthStencilState.BackFace.StencilFunc = D3D12Mapping::Mapping(dss_desc.back_stencil_func);
+
+		graphics_ps_desc.BlendState.AlphaToCoverageEnable = bs_desc.alpha_to_coverage_enable;
+		graphics_ps_desc.BlendState.IndependentBlendEnable = bs_desc.independent_blend_enable;
+		for (int i = 0; i < 8; ++ i)
 		{
 			uint32_t const rt_index = caps.independent_blend_support ? i : 0;
 
-			blend_desc_.RenderTarget[i].BlendEnable = desc.blend_enable[rt_index];
-			blend_desc_.RenderTarget[i].LogicOpEnable = desc.logic_op_enable[rt_index];
-			blend_desc_.RenderTarget[i].SrcBlend = D3D12Mapping::Mapping(desc.src_blend[rt_index]);
-			blend_desc_.RenderTarget[i].DestBlend = D3D12Mapping::Mapping(desc.dest_blend[rt_index]);
-			blend_desc_.RenderTarget[i].BlendOp = D3D12Mapping::Mapping(desc.blend_op[rt_index]);
-			blend_desc_.RenderTarget[i].SrcBlendAlpha = D3D12Mapping::Mapping(desc.src_blend_alpha[rt_index]);
-			blend_desc_.RenderTarget[i].DestBlendAlpha = D3D12Mapping::Mapping(desc.dest_blend_alpha[rt_index]);
-			blend_desc_.RenderTarget[i].BlendOpAlpha = D3D12Mapping::Mapping(desc.blend_op_alpha[rt_index]);
-			blend_desc_.RenderTarget[i].LogicOp
-				= caps.logic_op_support ? D3D12Mapping::Mapping(desc.logic_op[rt_index]) : D3D12_LOGIC_OP_NOOP;
-			blend_desc_.RenderTarget[i].RenderTargetWriteMask
-				= static_cast<UINT8>(D3D12Mapping::MappingColorMask(desc.color_write_mask[rt_index]));
+			graphics_ps_desc.BlendState.RenderTarget[i].BlendEnable = bs_desc.blend_enable[rt_index];
+			graphics_ps_desc.BlendState.RenderTarget[i].LogicOpEnable = bs_desc.logic_op_enable[rt_index];
+			graphics_ps_desc.BlendState.RenderTarget[i].SrcBlend = D3D12Mapping::Mapping(bs_desc.src_blend[rt_index]);
+			graphics_ps_desc.BlendState.RenderTarget[i].DestBlend = D3D12Mapping::Mapping(bs_desc.dest_blend[rt_index]);
+			graphics_ps_desc.BlendState.RenderTarget[i].BlendOp = D3D12Mapping::Mapping(bs_desc.blend_op[rt_index]);
+			graphics_ps_desc.BlendState.RenderTarget[i].SrcBlendAlpha = D3D12Mapping::Mapping(bs_desc.src_blend_alpha[rt_index]);
+			graphics_ps_desc.BlendState.RenderTarget[i].DestBlendAlpha = D3D12Mapping::Mapping(bs_desc.dest_blend_alpha[rt_index]);
+			graphics_ps_desc.BlendState.RenderTarget[i].BlendOpAlpha = D3D12Mapping::Mapping(bs_desc.blend_op_alpha[rt_index]);
+			graphics_ps_desc.BlendState.RenderTarget[i].LogicOp
+				= caps.logic_op_support ? D3D12Mapping::Mapping(bs_desc.logic_op[rt_index]) : D3D12_LOGIC_OP_NOOP;
+			graphics_ps_desc.BlendState.RenderTarget[i].RenderTargetWriteMask
+				= static_cast<UINT8>(D3D12Mapping::MappingColorMask(bs_desc.color_write_mask[rt_index]));
 		}
+		graphics_ps_desc.SampleMask = bs_desc.sample_mask;
+
+		graphics_ps_desc.NodeMask = 0;
+		graphics_ps_desc.CachedPSO.pCachedBlob = nullptr;
+		graphics_ps_desc.CachedPSO.CachedBlobSizeInBytes = 0;
+		graphics_ps_desc.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
 	}
 
-	void D3D12BlendStateObject::Active(Color const & blend_factor, uint32_t sample_mask)
+	void D3D12RenderStateObject::Active()
 	{
-		D3D12RenderEngine& re = *checked_cast<D3D12RenderEngine*>(&Context::Instance().RenderFactoryInstance().RenderEngineInstance());
-		re.OMSetBlendState(blend_factor, sample_mask);
+		auto& re = checked_cast<D3D12RenderEngine&>(Context::Instance().RenderFactoryInstance().RenderEngineInstance());
+		re.OMSetStencilRef(dss_desc_.front_stencil_ref);
+		re.OMSetBlendFactor(bs_desc_.blend_factor);
 	}
+
+	ID3D12PipelineState* D3D12RenderStateObject::RetrieveGraphicsPSO(RenderLayout const & rl, ShaderObject const & so,
+		FrameBuffer const & fb, bool has_tessellation) const
+	{
+		auto& d3d12_so = checked_cast<D3D12ShaderObject&>(const_cast<ShaderObject&>(so));
+		auto& d3d12_rl = checked_cast<D3D12RenderLayout&>(const_cast<RenderLayout&>(rl));
+		auto& d3d12_fb = checked_cast<D3D12FrameBuffer&>(const_cast<FrameBuffer&>(fb));
+
+		size_t hash_val = 0;
+		HashCombine(hash_val, d3d12_rl.PsoHashValue());
+		HashCombine(hash_val, d3d12_so.GetD3D12ShaderObjectTemplate());
+		HashCombine(hash_val, d3d12_fb.PsoHashValue());
+		HashCombine(hash_val, has_tessellation);
+
+		auto iter = psos_.find(hash_val);
+		if (iter == psos_.end())
+		{
+			D3D12_GRAPHICS_PIPELINE_STATE_DESC pso_desc = ps_desc_.graphics_ps_desc;
+
+			d3d12_rl.UpdatePsoDesc(pso_desc, has_tessellation);
+			d3d12_so.UpdatePsoDesc(pso_desc);
+			d3d12_fb.UpdatePsoDesc(pso_desc);
+		
+			auto& d3d12_re = checked_cast<D3D12RenderEngine&>(Context::Instance().RenderFactoryInstance().RenderEngineInstance());
+			auto d3d_device = d3d12_re.D3DDevice();
+
+			com_ptr<ID3D12PipelineState> d3d_pso;
+			TIFHR(d3d_device->CreateGraphicsPipelineState(&pso_desc, IID_ID3D12PipelineState, d3d_pso.put_void()));
+			iter = psos_.emplace(hash_val, std::move(d3d_pso)).first;
+		}
+
+		return iter->second.get();
+	}
+
+	ID3D12PipelineState* D3D12RenderStateObject::RetrieveComputePSO(ShaderObject const & so) const
+	{
+		auto& d3d12_so = checked_cast<D3D12ShaderObject&>(const_cast<ShaderObject&>(so));
+
+		size_t hash_val = 0;
+		HashCombine(hash_val, d3d12_so.GetD3D12ShaderObjectTemplate());
+
+		auto iter = psos_.find(hash_val);
+		if (iter == psos_.end())
+		{
+			D3D12_COMPUTE_PIPELINE_STATE_DESC pso_desc;
+			d3d12_so.UpdatePsoDesc(pso_desc);
+			pso_desc.NodeMask = 0;
+			pso_desc.CachedPSO.pCachedBlob = nullptr;
+			pso_desc.CachedPSO.CachedBlobSizeInBytes = 0;
+			pso_desc.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
+		
+			auto& d3d12_re = checked_cast<D3D12RenderEngine&>(Context::Instance().RenderFactoryInstance().RenderEngineInstance());
+			auto d3d_device = d3d12_re.D3DDevice();
+
+			com_ptr<ID3D12PipelineState> d3d_pso;
+			TIFHR(d3d_device->CreateComputePipelineState(&pso_desc, IID_ID3D12PipelineState, d3d_pso.put_void()));
+			iter = psos_.emplace(hash_val, std::move(d3d_pso)).first;
+		}
+
+		return iter->second.get();
+	}
+
 
 	D3D12SamplerStateObject::D3D12SamplerStateObject(SamplerStateDesc const & desc)
 		: SamplerStateObject(desc)

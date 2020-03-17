@@ -22,12 +22,7 @@ namespace KlayGE
 {
 	// ¹¹Ôìº¯Êý
 	/////////////////////////////////////////////////////////////////////////////////
-	D3D11Adapter::D3D11Adapter()
-					: adapter_no_(0)
-	{
-	}
-
-	D3D11Adapter::D3D11Adapter(uint32_t adapter_no, IDXGIAdapter1Ptr const & adapter)
+	D3D11Adapter::D3D11Adapter(uint32_t adapter_no, IDXGIAdapter2* adapter)
 					: adapter_no_(adapter_no)
 	{
 		this->ResetAdapter(adapter);
@@ -60,16 +55,18 @@ namespace KlayGE
 	/////////////////////////////////////////////////////////////////////////////////
 	void D3D11Adapter::Enumerate()
 	{
-		std::vector<DXGI_FORMAT> formats;
-		formats.push_back(DXGI_FORMAT_R8G8B8A8_UNORM);
-		formats.push_back(DXGI_FORMAT_R8G8B8A8_UNORM_SRGB);
-		formats.push_back(DXGI_FORMAT_B8G8R8A8_UNORM);
-		formats.push_back(DXGI_FORMAT_B8G8R8A8_UNORM_SRGB);
-		formats.push_back(DXGI_FORMAT_R10G10B10A2_UNORM);
+		static DXGI_FORMAT constexpr formats[] =
+		{
+			DXGI_FORMAT_R8G8B8A8_UNORM,
+			DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
+			DXGI_FORMAT_B8G8R8A8_UNORM,
+			DXGI_FORMAT_B8G8R8A8_UNORM_SRGB,
+			DXGI_FORMAT_R10G10B10A2_UNORM
+		};
 
 		UINT i = 0;
-		IDXGIOutput* output = nullptr;
-		while (adapter_->EnumOutputs(i, &output) != DXGI_ERROR_NOT_FOUND)
+		com_ptr<IDXGIOutput> output;
+		while (adapter_->EnumOutputs(i, output.release_and_put()) != DXGI_ERROR_NOT_FOUND)
 		{
 			if (output != nullptr)
 			{
@@ -95,9 +92,6 @@ namespace KlayGE
 						}
 					}
 				}
-
-				output->Release();
-				output = nullptr;
 			}
 
 			++ i;
@@ -106,29 +100,10 @@ namespace KlayGE
 		std::sort(modes_.begin(), modes_.end());
 	}
 
-	void D3D11Adapter::ResetAdapter(IDXGIAdapter1Ptr const & ada)
+	void D3D11Adapter::ResetAdapter(IDXGIAdapter2* adapter)
 	{
-		adapter_ = ada;
-		adapter_->GetDesc1(&adapter_desc_);
+		adapter_.reset(adapter);
+		adapter_->GetDesc2(&adapter_desc_);
 		modes_.resize(0);
-
-		IDXGIAdapter2* adapter2;
-		adapter_->QueryInterface(IID_IDXGIAdapter2, reinterpret_cast<void**>(&adapter2));
-		if (adapter2 != nullptr)
-		{
-			DXGI_ADAPTER_DESC2 desc2;
-			adapter2->GetDesc2(&desc2);
-			memcpy(adapter_desc_.Description, desc2.Description, sizeof(desc2.Description));
-			adapter_desc_.VendorId = desc2.VendorId;
-			adapter_desc_.DeviceId = desc2.DeviceId;
-			adapter_desc_.SubSysId = desc2.SubSysId;
-			adapter_desc_.Revision = desc2.Revision;
-			adapter_desc_.DedicatedVideoMemory = desc2.DedicatedVideoMemory;
-			adapter_desc_.DedicatedSystemMemory = desc2.DedicatedSystemMemory;
-			adapter_desc_.SharedSystemMemory = desc2.SharedSystemMemory;
-			adapter_desc_.AdapterLuid = desc2.AdapterLuid;
-			adapter_desc_.Flags = desc2.Flags;
-			adapter2->Release();
-		}
 	}
 }

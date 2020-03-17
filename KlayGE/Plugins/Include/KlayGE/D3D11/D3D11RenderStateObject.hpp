@@ -20,52 +20,33 @@
 
 namespace KlayGE
 {
-	class D3D11RasterizerStateObject : public RasterizerStateObject
+	class D3D11RenderStateObject : public RenderStateObject
 	{
 	public:
-		explicit D3D11RasterizerStateObject(RasterizerStateDesc const & desc);
+		D3D11RenderStateObject(RasterizerStateDesc const & rs_desc, DepthStencilStateDesc const & dss_desc,
+			BlendStateDesc const & bs_desc);
 
 		void Active();
 
-		ID3D11RasterizerStatePtr const & D3DRasterizerState() const
+		ID3D11RasterizerState1* D3DRasterizerState() const
 		{
-			return rasterizer_state_;
+			return rasterizer_state_.get();
+		}
+
+		ID3D11DepthStencilState* D3DDepthStencilState() const
+		{
+			return depth_stencil_state_.get();
+		}
+
+		ID3D11BlendState1* D3DBlendState() const
+		{
+			return blend_state_.get();
 		}
 
 	private:
-		ID3D11RasterizerStatePtr rasterizer_state_;
-	};
-
-	class D3D11DepthStencilStateObject : public DepthStencilStateObject
-	{
-	public:
-		explicit D3D11DepthStencilStateObject(DepthStencilStateDesc const & desc);
-
-		void Active(uint16_t front_stencil_ref, uint16_t back_stencil_ref);
-
-		ID3D11DepthStencilStatePtr const & D3DDepthStencilState() const
-		{
-			return depth_stencil_state_;
-		}
-
-	private:
+		ID3D11RasterizerState1Ptr rasterizer_state_;
 		ID3D11DepthStencilStatePtr depth_stencil_state_;
-	};
-
-	class D3D11BlendStateObject : public BlendStateObject
-	{
-	public:
-		explicit D3D11BlendStateObject(BlendStateDesc const & desc);
-
-		void Active(Color const & blend_factor, uint32_t sample_mask);
-
-		ID3D11BlendStatePtr const & D3DBlendState() const
-		{
-			return blend_state_;
-		}
-
-	private:
-		ID3D11BlendStatePtr blend_state_;
+		ID3D11BlendState1Ptr blend_state_;
 	};
 
 	class D3D11SamplerStateObject : public SamplerStateObject
@@ -73,9 +54,9 @@ namespace KlayGE
 	public:
 		explicit D3D11SamplerStateObject(SamplerStateDesc const & desc);
 
-		ID3D11SamplerStatePtr const & D3DSamplerState() const
+		ID3D11SamplerState* D3DSamplerState() const
 		{
-			return sampler_state_;
+			return sampler_state_.get();
 		}
 
 	private:

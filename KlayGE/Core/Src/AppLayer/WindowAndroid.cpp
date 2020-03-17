@@ -32,6 +32,8 @@
 
 #ifdef KLAYGE_PLATFORM_ANDROID
 
+#include <android/window.h>
+
 #include <KFL/Math.hpp>
 #include <KFL/Util.hpp>
 
@@ -40,50 +42,12 @@
 
 namespace KlayGE
 {
-	Window::Window(std::string const & /*name*/, RenderSettings const & settings)
-		: active_(false), ready_(false), closed_(false)
+	Window::Window(std::string const & name, RenderSettings const & settings, void* native_wnd)
+		: active_(false), ready_(false), closed_(false), keep_screen_on_(settings.keep_screen_on),
+			dpi_scale_(1), effective_dpi_scale_(1), win_rotation_(WR_Identity)
 	{
-		a_window_ = nullptr;
+		KFL_UNUSED(name);
 
-		android_app* state = Context::Instance().AppState();
-		state->userData = this;
-		state->onAppCmd = HandleCMD;
-		state->onInputEvent = HandleInput;
-
-		while (nullptr == a_window_)
-		{
-			// Read all pending events.
-			int ident;
-			int events;
-			android_poll_source* source;
-
-			do
-			{
-				ident = ALooper_pollAll(0, nullptr, &events, reinterpret_cast<void**>(&source));
-
-				// Process this event.
-				if (source != nullptr)
-				{
-					source->process(state, source);
-				}
-
-				// Check if we are exiting.
-				if (state->destroyRequested != 0)
-				{
-					return;
-				}
-			} while ((nullptr == a_window_) && (ident >= 0));
-		}
-
-		left_ = settings.left;
-		top_ = settings.top;
-		width_ = ANativeWindow_getWidth(a_window_);
-		height_ = ANativeWindow_getHeight(a_window_);
-	}
-
-	Window::Window(std::string const & /*name*/, RenderSettings const & settings, void* native_wnd)
-		: active_(false), ready_(false), closed_(false)
-	{
 		a_window_ = static_cast<ANativeWindow*>(native_wnd);
 
 		android_app* state = Context::Instance().AppState();
@@ -120,10 +84,20 @@ namespace KlayGE
 		top_ = settings.top;
 		width_ = ANativeWindow_getWidth(a_window_);
 		height_ = ANativeWindow_getHeight(a_window_);
+
+		if (keep_screen_on_)
+		{
+			ANativeActivity_setWindowFlags(state->activity, AWINDOW_FLAG_KEEP_SCREEN_ON, 0);
+		}
 	}
 
 	Window::~Window()
 	{
+		if (keep_screen_on_)
+		{
+			android_app* state = Context::Instance().AppState();
+			ANativeActivity_setWindowFlags(state->activity, 0, AWINDOW_FLAG_KEEP_SCREEN_ON);
+		}
 	}
 
 	void Window::HandleCMD(android_app* app, int32_t cmd)
@@ -250,7 +224,6 @@ namespace KlayGE
 					}
 					break;
 
-#if (__ANDROID_API__ >= 12)
 				case AINPUT_SOURCE_JOYSTICK:
 					{
 						for (uint32_t i = 0; i < 8; i++)
@@ -259,7 +232,6 @@ namespace KlayGE
 						}
 					}
 					break;
-#endif
 
 				default:
 					break;
@@ -289,11 +261,9 @@ namespace KlayGE
 				}
 				break;
 
-#if (__ANDROID_API__ >= 12)
 			case AINPUT_SOURCE_JOYSTICK:
 				win->OnJoystickButtons()(*win, AMotionEvent_getButtonState(event));
 				break;
-#endif
 
 			default:
 				break;

@@ -44,27 +44,21 @@ namespace KlayGE
 	class KLAYGE_CORE_API SSSBlurPP : public PostProcess
 	{
 	public:
-		SSSBlurPP();
+		explicit SSSBlurPP(bool multi_sample);
 
-		virtual void InputPin(uint32_t index, TexturePtr const & tex) KLAYGE_OVERRIDE;
+		void InputPin(uint32_t index, ShaderResourceViewPtr const& srv) override;
 		using PostProcess::InputPin;
 
-		virtual void Apply() KLAYGE_OVERRIDE;
+		virtual void Apply() override;
 
 	private:
-		bool mrt_blend_support_;
-
 		FrameBufferPtr blur_x_fb_;
-		FrameBufferPtr blur_y_fb_;
 		TexturePtr blur_x_tex_;
-		TexturePtr blur_y_tex_;
-		RenderTechniquePtr copy_tech_;
-		RenderTechniquePtr blur_x_tech_;
-		RenderTechniquePtr blur_y_techs_[3];
-		RenderTechniquePtr accum_techs_[3];
-		RenderEffectParameterPtr src_tex_param_;
-		RenderEffectParameterPtr step_param_;
-		RenderEffectParameterPtr far_plane_param_;
+		RenderTechnique* blur_x_tech_;
+		RenderTechnique* blur_y_tech_;
+		RenderEffectParameter* src_tex_param_;
+		RenderEffectParameter* step_param_;
+		RenderEffectParameter* far_plane_param_;
 	};
 }
 

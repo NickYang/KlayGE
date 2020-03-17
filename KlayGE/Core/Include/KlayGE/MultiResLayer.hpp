@@ -37,7 +37,7 @@
 
 namespace KlayGE
 {
-	class KLAYGE_CORE_API MultiResLayer
+	class KLAYGE_CORE_API MultiResLayer : boost::noncopyable
 	{
 	public:
 		MultiResLayer();
@@ -54,7 +54,7 @@ namespace KlayGE
 		}
 
 	private:
-		void CreateDepthDerivativeMipMap(Camera const & vp_camera);
+		void CreateDepthDerivativeMipMap();
 		void CreateNormalConeMipMap();
 		void SetSubsplatStencil(Camera const & vp_camera);
 
@@ -62,18 +62,30 @@ namespace KlayGE
 		RenderLayoutPtr rl_quad_;
 
 		TexturePtr g_buffer_rt0_tex_;
-		TexturePtr g_buffer_depth_tex_;
+		ShaderResourceViewPtr g_buffer_rt0_srv_;
+		ShaderResourceViewPtr g_buffer_depth_srv_;
 
-		TexturePtr depth_deriative_tex_;
-		TexturePtr depth_deriative_small_tex_;
+		TexturePtr depth_derivative_tex_;
+		ShaderResourceViewPtr depth_derivative_srv_;
+		std::vector<ShaderResourceViewPtr> depth_derivative_mip_srvs_;
+		std::vector<RenderTargetViewPtr> depth_derivative_mip_rtvs_;
+		TexturePtr depth_derivative_small_tex_;
+		std::vector<RenderTargetViewPtr> depth_derivative_small_mip_rtvs_;
 		TexturePtr normal_cone_tex_;
+		ShaderResourceViewPtr normal_cone_srv_;
+		std::vector<ShaderResourceViewPtr> normal_cone_mip_srvs_;
+		std::vector<RenderTargetViewPtr> normal_cone_mip_rtvs_;
 		TexturePtr normal_cone_small_tex_;
+		std::vector<RenderTargetViewPtr> normal_cone_small_mip_rtvs_;
 
 		TexturePtr multi_res_tex_;
+		ShaderResourceViewPtr multi_res_srv_;
 		TexturePtr multi_res_pingpong_tex_;
+		std::vector<RenderTargetViewPtr> multi_res_pingpong_mip_rtvs_;
 		std::vector<FrameBufferPtr> multi_res_fbs_;
 
-		RenderTechniquePtr subsplat_stencil_tech_;
+		RenderEffectPtr subsplat_stencil_effect_;
+		RenderTechnique* subsplat_stencil_tech_;
 
 		PostProcessPtr gbuffer_to_depth_derivate_pp_;
 		PostProcessPtr depth_derivate_mipmap_pp_;
@@ -82,12 +94,11 @@ namespace KlayGE
 
 		PostProcessPtr upsampling_pp_;
 
-		RenderEffectParameterPtr subsplat_cur_lower_level_param_;
-		RenderEffectParameterPtr subsplat_is_not_first_last_level_param_;
-		RenderEffectParameterPtr subsplat_depth_deriv_tex_param_;
-		RenderEffectParameterPtr subsplat_normal_cone_tex_param_;
-		RenderEffectParameterPtr subsplat_depth_normal_threshold_param_;
-		RenderEffectParameterPtr subsplat_far_plane_param_;
+		RenderEffectParameter* subsplat_cur_lower_level_param_;
+		RenderEffectParameter* subsplat_is_not_first_last_level_param_;
+		RenderEffectParameter* subsplat_depth_deriv_tex_param_;
+		RenderEffectParameter* subsplat_normal_cone_tex_param_;
+		RenderEffectParameter* subsplat_depth_normal_threshold_param_;
 	};
 }
 

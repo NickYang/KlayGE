@@ -4,13 +4,8 @@
 	<include name="DeferredRenderingUtil.fxml"/>
 	<include name="Lighting.fxml"/>
 	<include name="util.fxml"/>
-	
-	<cbuffer name="per_frame">
-		<parameter type="float3" name="depth_near_far_invfar"/>
-	</cbuffer>
 
 	<parameter type="float" name="esm_scale_factor"/>
-	<parameter type="float" name="sm_far_plane"/>
 
 	<cbuffer name="light_sources">
 		<parameter type="float4x4" name="light_view_proj"/>
@@ -32,8 +27,10 @@
 		<parameter type="int" name="num_cascades"/>
 	</cbuffer>
 
-	<parameter type="texture2D" name="filtered_sm_2d_tex"/>
-	<parameter type="textureCUBE" name="filtered_sm_cube_tex"/>
+	<parameter type="texture2D" name="filtered_shadow_map_2d_tex"/>
+	<parameter type="texture2DArray" name="filtered_shadow_map_2d_tex_array"/>
+	<parameter type="int" name="filtered_shadow_map_2d_light_index"/>
+	<parameter type="textureCUBE" name="filtered_shadow_map_cube_tex"/>
 	<parameter type="texture2DArray" name="filtered_csm_tex_array"/>
 	<parameter type="texture2D" name="filtered_csm_0_tex"/>
 	<parameter type="texture2D" name="filtered_csm_1_tex"/>
@@ -72,17 +69,12 @@
 	</parameter>
 
 	<parameter type="float2" name="inv_width_height"/>
-	<parameter type="texture2D" name="g_buffer_tex"/>
+	<parameter type="texture2D" name="g_buffer_rt0_tex"/>
 	<parameter type="texture2D" name="depth_tex"/>
+	<parameter type="texture2DMS" name="depth_tex_ms"/>
 
 	<shader>
 		<![CDATA[
-#if !KLAYGE_DXBC2GLSL
-#if KLAYGE_SHADER_MODEL >= SHADER_MODEL(4, 0)
-#define NOPERSPECTIVE_SUPPORT
-#endif
-#endif
-
 float4 CalcColor(float n_dot_l, float spec, float atten, float3 shadow, float4 light_color, float4 light_attrib)
 {
 	float2 ds = n_dot_l * atten * float2(1, spec);
@@ -91,66 +83,57 @@ float4 CalcColor(float n_dot_l, float spec, float atten, float3 shadow, float4 l
 	return ds.xxxy * light_color * float4(shadow, dot(shadow, 1) / 3);
 }
 
-float Calc_ESM(float occluder, float len)
+float CalcESM(float occluder, float len, float esm_scale_factor)
 {
 	// Exponential shadow mapping
 	return saturate(exp(occluder - esm_scale_factor * len));
 }
 
-float4 ESM_Omnidirectional(float3 dir_ls, float len)
+float4 ESMOmnidirectional(float3 dir_ls, float len, bool has_shadow, bool has_projective, float esm_scale_factor)
 {
 	dir_ls.y *= -KLAYGE_FLIPPING;
 	
 	float shadow = 1;
-	if (light_attrib.z > 0)
+	if (has_shadow)
 	{
-		float occluder = ReadAFloat(filtered_sm_cube_tex.Sample(linear_sampler, dir_ls), sm_far_plane * esm_scale_factor);
-		shadow = Calc_ESM(occluder, len);
+		float occluder = filtered_shadow_map_cube_tex.SampleLevel(linear_sampler, dir_ls, 0).x;
+		shadow = CalcESM(occluder, len, esm_scale_factor);
 	}
 
 	float4 projective = 1;
-	if (light_attrib.w > 0)
+	if (has_projective)
 	{
-		projective = projective_map_cube_tex.Sample(linear_sampler, dir_ls);
+		projective = projective_map_cube_tex.SampleLevel(linear_sampler, dir_ls, 0);
 	}
 	
 	return projective * shadow;
 }
 
-float4 ESM_Directional(float3 pos_es, float len)
-{
-	float4 light_proj_pos = mul(float4(pos_es, 1), light_view_proj);
-	light_proj_pos /= light_proj_pos.w;
-	light_proj_pos.y *= KLAYGE_FLIPPING;
-	light_proj_pos.xy = light_proj_pos.xy / 2 + 0.5f;
-		
+float4 ESMDirectional(float3 pos_es, float2 light_proj_pos, float len, bool has_shadow, bool has_projective, int sm_index,
+	float esm_scale_factor)
+{		
 	float shadow = 1;
-	if (light_attrib.z > 0)
+	if (has_shadow)
 	{
-		float occluder = ReadAFloat(filtered_sm_2d_tex.Sample(linear_sampler, light_proj_pos.xy), sm_far_plane * esm_scale_factor);
-		shadow = Calc_ESM(occluder, len);
+#if (KLAYGE_MAX_TEX_ARRAY_LEN >= 4) && (1 == KLAYGE_RENDER_TO_TEX_ARRAY)
+		float occluder = filtered_shadow_map_2d_tex_array.SampleLevel(linear_sampler, float3(light_proj_pos, sm_index), 0).x;
+#else
+		float occluder = filtered_shadow_map_2d_tex.SampleLevel(linear_sampler, light_proj_pos, 0).x;
+#endif
+		shadow = CalcESM(occluder, len, esm_scale_factor);
 	}
 	
 	float4 projective = 1;
-	if (light_attrib.w > 0)
+	if (has_projective)
 	{
-		projective = projective_map_2d_tex.Sample(linear_sampler, light_proj_pos.xy);
+		projective = projective_map_2d_tex.SampleLevel(linear_sampler, light_proj_pos, 0);
 	}
 	
 	return projective * shadow;
 }
 
-float4 ESM_Sun(float3 pos_es, float len)
-{
-	float2 light_proj_pos = mul(float4(pos_es, 1), light_view_proj).xy;
-	light_proj_pos.y *= -1;
-	light_proj_pos = light_proj_pos * 0.5f + 0.5f;
-#if KLAYGE_DERIVATIVES
-	float4 tc_ddx_ddy = float4(ddx(light_proj_pos), ddy(light_proj_pos));
-#else
-	float4 tc_ddx_ddy = 0;
-#endif
-	
+float4 ESMSun(float3 pos_es, float2 light_proj_pos, float4 tc_ddx_ddy, float len, float esm_scale_factor)
+{	
 	float shadow = 0;
 	if ((pos_es.z >= cascade_intervals[0].x) && (pos_es.z < cascade_intervals[num_cascades - 1].y))
 	{
@@ -163,33 +146,33 @@ float4 ESM_Sun(float3 pos_es, float len)
 
 				float4 shadow_tc_ddx_ddy = tc_ddx_ddy * cascade_scale_bias[i].xyxy;
 
-#if KLAYGE_MAX_TEX_ARRAY_LEN >= 4
-				float occluder = ReadAFloat(filtered_csm_tex_array.SampleGrad(aniso_sampler, float3(shadow_tc, i),
-					shadow_tc_ddx_ddy.xy, shadow_tc_ddx_ddy.zw), sm_far_plane * esm_scale_factor);
+#if (KLAYGE_MAX_TEX_ARRAY_LEN >= 4) && (1 == KLAYGE_RENDER_TO_TEX_ARRAY)
+				float occluder = filtered_csm_tex_array.SampleGrad(aniso_sampler, float3(shadow_tc, i),
+					shadow_tc_ddx_ddy.xy, shadow_tc_ddx_ddy.zw).x;
 #else
 				float occluder;
 				if (0 == i)
 				{
-					occluder = ReadAFloat(filtered_csm_0_tex.SampleGrad(aniso_sampler, shadow_tc,
-						shadow_tc_ddx_ddy.xy, shadow_tc_ddx_ddy.zw), sm_far_plane * esm_scale_factor);
+					occluder = filtered_csm_0_tex.SampleGrad(aniso_sampler, shadow_tc,
+						shadow_tc_ddx_ddy.xy, shadow_tc_ddx_ddy.zw).x;
 				}
 				else if (1 == i)
 				{
-					occluder = ReadAFloat(filtered_csm_1_tex.SampleGrad(aniso_sampler, shadow_tc,
-						shadow_tc_ddx_ddy.xy, shadow_tc_ddx_ddy.zw), sm_far_plane * esm_scale_factor);
+					occluder = filtered_csm_1_tex.SampleGrad(aniso_sampler, shadow_tc,
+						shadow_tc_ddx_ddy.xy, shadow_tc_ddx_ddy.zw).x;
 				}
 				else if (2 == i)
 				{
-					occluder = ReadAFloat(filtered_csm_2_tex.SampleGrad(aniso_sampler, shadow_tc,
-						shadow_tc_ddx_ddy.xy, shadow_tc_ddx_ddy.zw), sm_far_plane * esm_scale_factor);
+					occluder = filtered_csm_2_tex.SampleGrad(aniso_sampler, shadow_tc,
+						shadow_tc_ddx_ddy.xy, shadow_tc_ddx_ddy.zw).x;
 				}
 				else
 				{
-					occluder = ReadAFloat(filtered_csm_3_tex.SampleGrad(aniso_sampler, shadow_tc,
-						shadow_tc_ddx_ddy.xy, shadow_tc_ddx_ddy.zw), sm_far_plane * esm_scale_factor);
+					occluder = filtered_csm_3_tex.SampleGrad(aniso_sampler, shadow_tc,
+						shadow_tc_ddx_ddy.xy, shadow_tc_ddx_ddy.zw).x;
 				}
 #endif
-				shadow += Calc_ESM(occluder, len);
+				shadow += CalcESM(occluder, len, esm_scale_factor);
 			}
 		}
 	}
@@ -201,11 +184,11 @@ float4 NearestDepthUpsamplingShadow(float2 tc, float2 tc_ddx, float2 tc_ddy, int
 {
 	float2 l1_inv_width_height = inv_width_height * 2;
 	float2 tc0 = tc - inv_width_height;
-	float z00 = ReadAFloat(depth_tex.SampleGrad(point_sampler, tc0, tc_ddx * 2, tc_ddy * 2), depth_near_far_invfar.y);
-	float z10 = ReadAFloat(depth_tex.SampleGrad(point_sampler, tc0 + float2(l1_inv_width_height.x, 0), tc_ddx * 2, tc_ddy * 2), depth_near_far_invfar.y);
-	float z01 = ReadAFloat(depth_tex.SampleGrad(point_sampler, tc0 + float2(0, l1_inv_width_height.y), tc_ddx * 2, tc_ddy * 2), depth_near_far_invfar.y);
-	float z11 = ReadAFloat(depth_tex.SampleGrad(point_sampler, tc0 + l1_inv_width_height, tc_ddx * 2, tc_ddy * 2), depth_near_far_invfar.y);
-	float z_full = ReadAFloat(depth_tex.SampleGrad(point_sampler, tc, tc_ddx, tc_ddy), depth_near_far_invfar.y);
+	float z00 = depth_tex.SampleGrad(point_sampler, tc0, tc_ddx * 2, tc_ddy * 2).x;
+	float z10 = depth_tex.SampleGrad(point_sampler, tc0 + float2(l1_inv_width_height.x, 0), tc_ddx * 2, tc_ddy * 2).x;
+	float z01 = depth_tex.SampleGrad(point_sampler, tc0 + float2(0, l1_inv_width_height.y), tc_ddx * 2, tc_ddy * 2).x;
+	float z11 = depth_tex.SampleGrad(point_sampler, tc0 + l1_inv_width_height, tc_ddx * 2, tc_ddy * 2).x;
+	float z_full = depth_tex.SampleGrad(point_sampler, tc, tc_ddx, tc_ddy).x;
 	float threshold = 0.25f;
 
 	float3 ndus = NearestDepthUpsampling(tc0, float4(z00, z10, z01, z11), z_full, l1_inv_width_height, threshold);
@@ -245,29 +228,18 @@ float4 DeferredRenderingDepthOnlyPS() : SV_Target
 }
 
 void DeferredRenderingVS(float4 pos : POSITION,
-#ifdef NOPERSPECTIVE_SUPPORT
-				out noperspective float2 oTc : TEXCOORD0,
-#else
-				out float3 oTc : TEXCOORD0,
-#endif
+				out SS_TEXCOORD_TYPE oTc : TEXCOORD0,
 				out float3 oViewDir : TEXCOORD1,
 				out float4 oPos : SV_Position)
 {
 	oPos = mul(pos, light_volume_mvp);
 
 	oViewDir = mul(pos, light_volume_mv).xyz;
-	oTc.xy = oPos.xy / oPos.w * 0.5f;
-	oTc.y *= KLAYGE_FLIPPING;
-	oTc.xy += 0.5f;
-
-#ifndef NOPERSPECTIVE_SUPPORT
-	oTc.z = oPos.w;
-	oTc.xy *= oTc.z;
-#endif
+	oTc = EncodeSSTexcoord(oPos);
 }
 
 float4 CalcDRLighting(float3 light_pos, float3 pos_es, float3 normal, float3 view_dir,
-		float shininess, float2 tc, float atten, float irrandance_factor, float2 tc_ddx, float2 tc_ddy)
+		float shininess, float2 tc, float atten, float2 tc_ddx, float2 tc_ddy)
 {
 	float4 lighting = 0;
 	float3 dir = light_pos - pos_es;
@@ -284,8 +256,8 @@ float4 CalcDRLighting(float3 light_pos, float3 pos_es, float3 normal, float3 vie
 				shadow = NearestDepthUpsamplingShadow(tc, tc_ddx, tc_ddy, shadowing_channel).xyz;
 			}
 
-			float spec = roughness_term(normalize(dir - view_dir), normal, shininess).x;
-			lighting = CalcColor(n_dot_l, spec, atten, shadow, irrandance_factor * light_color, light_attrib);
+			float spec = DistributionTerm(normalize(dir - view_dir), normal, shininess).x;
+			lighting = CalcColor(n_dot_l, spec, atten, shadow, light_color, light_attrib);
 		}
 	}
 	
@@ -293,108 +265,75 @@ float4 CalcDRLighting(float3 light_pos, float3 pos_es, float3 normal, float3 vie
 }
 
 float4 DeferredRenderingPointPS(
-#ifdef NOPERSPECTIVE_SUPPORT
-	noperspective float2 tc : TEXCOORD0,
-#else
-	float3 tc_w : TEXCOORD0,
-#endif
+	SS_TEXCOORD_TYPE ss_tc : TEXCOORD0,
 	float3 view_dir : TEXCOORD1) : SV_Target
 {
-#ifndef NOPERSPECTIVE_SUPPORT
-	float2 tc = tc_w.xy / tc_w.z;
-#endif
+	float2 tc = DecodeSSTexcoord(ss_tc);
 
-#if KLAYGE_DERIVATIVES
 	float2 tc_ddx = ddx(tc);
 	float2 tc_ddy = ddy(tc);
-#else
-	float2 tc_ddx = 0;
-	float2 tc_ddy = 0;
-#endif
 
-	float4 ndc = g_buffer_tex.Sample(point_sampler, tc);
+	float4 rt0 = g_buffer_rt0_tex.Sample(point_sampler, tc);
 
 	view_dir = normalize(view_dir);
-	float3 pos_es = view_dir * (ReadAFloat(depth_tex.Sample(point_sampler, tc), depth_near_far_invfar.y) / view_dir.z);
-	float3 normal = GetNormal(ndc);
-	float shininess = GetShininess(ndc);
+	float3 pos_es = view_dir * (depth_tex.Sample(point_sampler, tc).x / view_dir.z);
+	float3 normal = GetNormal(rt0);
+	float shininess = Glossiness2Shininess(GetGlossiness(rt0));
 	
 	return CalcDRLighting(light_pos_es.xyz, pos_es, normal, view_dir,
 		shininess, tc,
-		attenuation_term(light_pos_es.xyz, pos_es, light_falloff_range.xyz), 1, tc_ddx, tc_ddy);
+		AttenuationTerm(light_pos_es.xyz, pos_es, light_falloff_range.xyz), tc_ddx, tc_ddy);
 }
 
 float4 DeferredRenderingSpotPS(
-#ifdef NOPERSPECTIVE_SUPPORT
-	noperspective float2 tc : TEXCOORD0,
-#else
-	float3 tc_w : TEXCOORD0,
-#endif
+	SS_TEXCOORD_TYPE ss_tc : TEXCOORD0,
 	float3 view_dir : TEXCOORD1) : SV_Target
 {
-#ifndef NOPERSPECTIVE_SUPPORT
-	float2 tc = tc_w.xy / tc_w.z;
-#endif
+	float2 tc = DecodeSSTexcoord(ss_tc);
 
-#if KLAYGE_DERIVATIVES
 	float2 tc_ddx = ddx(tc);
 	float2 tc_ddy = ddy(tc);
-#else
-	float2 tc_ddx = 0;
-	float2 tc_ddy = 0;
-#endif
 
-	float4 ndc = g_buffer_tex.Sample(point_sampler, tc);
+	float4 rt0 = g_buffer_rt0_tex.Sample(point_sampler, tc);
 	float4 lighting = 0;
 	
 	view_dir = normalize(view_dir);
-	float3 pos_es = view_dir * (ReadAFloat(depth_tex.Sample(point_sampler, tc), depth_near_far_invfar.y) / view_dir.z);
-	float spot = spot_lighting(light_pos_es.xyz, light_dir_es.xyz,
+	float3 pos_es = view_dir * (depth_tex.Sample(point_sampler, tc).x / view_dir.z);
+	float spot = SpotLighting(light_pos_es.xyz, light_dir_es.xyz,
 				float2(light_pos_es.w, light_dir_es.w), pos_es.xyz);
 	if (spot > 0)
 	{
-		float3 normal = GetNormal(ndc);
-		float shininess = GetShininess(ndc);
+		float3 normal = GetNormal(rt0);
+		float shininess = Glossiness2Shininess(GetGlossiness(rt0));
 		
 		lighting = CalcDRLighting(light_pos_es.xyz, pos_es, normal, view_dir,
 			shininess, tc,
-			spot * attenuation_term(light_pos_es.xyz, pos_es, light_falloff_range.xyz), 1, tc_ddx, tc_ddy);
+			spot * AttenuationTerm(light_pos_es.xyz, pos_es, light_falloff_range.xyz), tc_ddx, tc_ddy);
 	}
 
 	return lighting;
 }
 
-float4 DeferredRenderingSunPS(
-#ifdef NOPERSPECTIVE_SUPPORT
-	noperspective float2 tc : TEXCOORD0,
-#else
-	float3 tc_w : TEXCOORD0,
-#endif
+float4 DeferredRenderingDirectionalPS(
+	SS_TEXCOORD_TYPE ss_tc : TEXCOORD0,
 	float3 view_dir : TEXCOORD1) : SV_Target
 {
-#ifndef NOPERSPECTIVE_SUPPORT
-	float2 tc = tc_w.xy / tc_w.z;
-#endif
+	float2 tc = DecodeSSTexcoord(ss_tc);
 
-#if KLAYGE_DERIVATIVES
 	float2 tc_ddx = ddx(tc);
 	float2 tc_ddy = ddy(tc);
-#else
-	float2 tc_ddx = 0;
-	float2 tc_ddy = 0;
-#endif
 	
-	float4 ndc = g_buffer_tex.Sample(point_sampler, tc);
+	float4 rt0 = g_buffer_rt0_tex.Sample(point_sampler, tc);
 	float4 lighting = 0;
 	
 	view_dir = normalize(view_dir);
 
 	float3 dir = light_dir_es.xyz;
-	float3 normal = GetNormal(ndc);
+	float3 normal = GetNormal(rt0);
 	float n_dot_l = dot(normal, dir);
 	if (n_dot_l > 0)
 	{
-		float spec = roughness_term(normalize(dir - view_dir), normal, GetShininess(ndc)).x;
+		float spec = DistributionTerm(normalize(dir - view_dir), normal, Glossiness2Shininess(GetGlossiness(rt0))).x;
 		float3 shadow = 1;
 		if (shadowing_channel >= 0)
 		{
@@ -406,114 +345,57 @@ float4 DeferredRenderingSunPS(
 	return lighting;
 }
 
-float4 DeferredRenderingDirectionalPS(
-#ifdef NOPERSPECTIVE_SUPPORT
-	noperspective float2 tc : TEXCOORD0,
-#else
-	float3 tc_w : TEXCOORD0,
-#endif
-	float3 view_dir : TEXCOORD1) : SV_Target
-{
-#ifndef NOPERSPECTIVE_SUPPORT
-	float2 tc = tc_w.xy / tc_w.z;
-#endif
-	
-	float4 ndc = g_buffer_tex.Sample(point_sampler, tc);
-	float4 lighting = 0;
-	
-	view_dir = normalize(view_dir);
-
-	float3 dir = light_dir_es.xyz;
-	float3 normal = GetNormal(ndc);
-	float n_dot_l = dot(normal, dir);
-	if (n_dot_l > 0)
-	{
-		float spec = roughness_term(normalize(dir - view_dir), normal, GetShininess(ndc)).x;
-		lighting = CalcColor(n_dot_l, spec, 1, 1, light_color, light_attrib);
-	}
-
-	return lighting;
-}
-
 float4 DeferredRenderingAmbientPS(
-#ifdef NOPERSPECTIVE_SUPPORT
-	noperspective float2 tc : TEXCOORD0
-#else
-	float3 tc_w : TEXCOORD0
-#endif
+	SS_TEXCOORD_TYPE ss_tc : TEXCOORD0
 	) : SV_Target
 {
-#ifndef NOPERSPECTIVE_SUPPORT
-	float2 tc = tc_w.xy / tc_w.z;
-#endif
+	float2 tc = DecodeSSTexcoord(ss_tc);
 
-	float4 ndc = g_buffer_tex.Sample(point_sampler, tc);
-	float3 normal = GetNormal(ndc);
+	float4 rt0 = g_buffer_rt0_tex.Sample(point_sampler, tc);
+	float3 normal = GetNormal(rt0);
 
 	return CalcColor(0.5f + 0.5f * dot(light_dir_es.xyz, normal), 0, 1, 1, light_color, light_attrib);
 }
 
 float4 DeferredRenderingSphereAreaPS(
-#ifdef NOPERSPECTIVE_SUPPORT
-	noperspective float2 tc : TEXCOORD0,
-#else
-	float3 tc_w : TEXCOORD0,
-#endif
+	SS_TEXCOORD_TYPE ss_tc : TEXCOORD0,
 	float3 view_dir : TEXCOORD1) : SV_Target
 {
-#ifndef NOPERSPECTIVE_SUPPORT
-	float2 tc = tc_w.xy / tc_w.z;
-#endif
+	float2 tc = DecodeSSTexcoord(ss_tc);
 
-#if KLAYGE_DERIVATIVES
 	float2 tc_ddx = ddx(tc);
 	float2 tc_ddy = ddy(tc);
-#else
-	float2 tc_ddx = 0;
-	float2 tc_ddy = 0;
-#endif
 
-	float4 ndc = g_buffer_tex.Sample(point_sampler, tc);
+	float4 rt0 = g_buffer_rt0_tex.Sample(point_sampler, tc);
 
 	view_dir = normalize(view_dir);
-	float3 pos_es = view_dir * (ReadAFloat(depth_tex.Sample(point_sampler, tc), depth_near_far_invfar.y) / view_dir.z);
-	float3 normal = GetNormal(ndc);
-	float shininess = GetShininess(ndc);
+	float3 pos_es = view_dir * (depth_tex.Sample(point_sampler, tc).x / view_dir.z);
+	float3 normal = GetNormal(rt0);
+	float shininess = Glossiness2Shininess(GetGlossiness(rt0));
 	
 	float3 light_pos = SphereAreaLightPositionFixup(light_pos_es.xyz, light_radius_extend.x, pos_es,
 		normal, view_dir);
 	shininess = AreaLightShininessFixup(shininess, light_pos_es.xyz, light_radius_extend.x, pos_es);
 	return CalcDRLighting(light_pos, pos_es, normal, view_dir,
 		shininess, tc,
-		attenuation_term(light_pos_es.xyz, pos_es, light_falloff_range.xyz), 1, tc_ddx, tc_ddy);
+		AttenuationTerm(light_pos_es.xyz, pos_es, light_falloff_range.xyz), tc_ddx, tc_ddy);
 }
 
 float4 DeferredRenderingTubeAreaPS(
-#ifdef NOPERSPECTIVE_SUPPORT
-	noperspective float2 tc : TEXCOORD0,
-#else
-	float3 tc_w : TEXCOORD0,
-#endif
+	SS_TEXCOORD_TYPE ss_tc : TEXCOORD0,
 	float3 view_dir : TEXCOORD1) : SV_Target
 {
-#ifndef NOPERSPECTIVE_SUPPORT
-	float2 tc = tc_w.xy / tc_w.z;
-#endif
+	float2 tc = DecodeSSTexcoord(ss_tc);
 
-#if KLAYGE_DERIVATIVES
 	float2 tc_ddx = ddx(tc);
 	float2 tc_ddy = ddy(tc);
-#else
-	float2 tc_ddx = 0;
-	float2 tc_ddy = 0;
-#endif
 
-	float4 ndc = g_buffer_tex.Sample(point_sampler, tc);
+	float4 rt0 = g_buffer_rt0_tex.Sample(point_sampler, tc);
 
 	view_dir = normalize(view_dir);
-	float3 pos_es = view_dir * (ReadAFloat(depth_tex.Sample(point_sampler, tc), depth_near_far_invfar.y) / view_dir.z);
-	float3 normal = GetNormal(ndc);
-	float shininess = GetShininess(ndc);
+	float3 pos_es = view_dir * (depth_tex.Sample(point_sampler, tc).x / view_dir.z);
+	float3 normal = GetNormal(rt0);
+	float shininess = Glossiness2Shininess(GetGlossiness(rt0));
 	
 	float3 l0 = light_pos_es.xyz - light_radius_extend.yzw - pos_es;
 	float3 l1 = light_pos_es.xyz + light_radius_extend.yzw - pos_es;
@@ -521,63 +403,54 @@ float4 DeferredRenderingTubeAreaPS(
 	float2 atten_irra_factor = TubeAreaLightAttenuationIrradianceFixup(l0, l1, normal);
 	shininess = AreaLightShininessFixup(shininess, light_pos_es.xyz, light_radius_extend.x, pos_es);
 	return CalcDRLighting(light_pos, pos_es, normal, view_dir,
-		shininess, tc, atten_irra_factor.x, atten_irra_factor.y, tc_ddx, tc_ddy);
+		shininess, tc, atten_irra_factor.x * atten_irra_factor.y, tc_ddx, tc_ddy);
 }
 
 float4 DeferredShadowingPointPS(
-#ifdef NOPERSPECTIVE_SUPPORT
-	noperspective float2 tc : TEXCOORD0,
-#else
-	float3 tc_w : TEXCOORD0,
-#endif
+	SS_TEXCOORD_TYPE ss_tc : TEXCOORD0,
 	float3 view_dir : TEXCOORD1) : SV_Target
 {
-#ifndef NOPERSPECTIVE_SUPPORT
-	float2 tc = tc_w.xy / tc_w.z;
-#endif
+	float2 tc = DecodeSSTexcoord(ss_tc);
 
 	view_dir = normalize(view_dir);
-	float3 pos_es = view_dir * (ReadAFloat(depth_tex.Sample(point_sampler, tc), depth_near_far_invfar.y) / view_dir.z);
+	float3 pos_es = view_dir * (depth_tex.Sample(point_sampler, tc).x / view_dir.z);
 	float3 dir = light_pos_es.xyz - pos_es;
 	float len = length(dir);
 	float3 dir_ls = mul(-dir, (float3x3)view_to_light_model);
-	return ESM_Omnidirectional(dir_ls, len);
+	return ESMOmnidirectional(dir_ls, len, light_attrib.z > 0, light_attrib.w > 0, esm_scale_factor);
 }
 
 float4 DeferredShadowingSpotPS(
-#ifdef NOPERSPECTIVE_SUPPORT
-	noperspective float2 tc : TEXCOORD0,
-#else
-	float3 tc_w : TEXCOORD0,
-#endif
+	SS_TEXCOORD_TYPE ss_tc : TEXCOORD0,
 	float3 view_dir : TEXCOORD1) : SV_Target
 {
-#ifndef NOPERSPECTIVE_SUPPORT
-	float2 tc = tc_w.xy / tc_w.z;
-#endif
+	float2 tc = DecodeSSTexcoord(ss_tc);
 
 	view_dir = normalize(view_dir);
-	float3 pos_es = view_dir * (ReadAFloat(depth_tex.Sample(point_sampler, tc), depth_near_far_invfar.y) / view_dir.z);
-	float len = length(light_pos_es.xyz - pos_es);
-	return ESM_Directional(pos_es, len);
+	float3 pos_es = view_dir * (depth_tex.Sample(point_sampler, tc).x / view_dir.z);
+	float4 light_proj_pos = mul(float4(pos_es, 1), light_view_proj);
+	light_proj_pos /= light_proj_pos.w;
+	light_proj_pos.y *= KLAYGE_FLIPPING;
+	light_proj_pos.xy = light_proj_pos.xy * 0.5f + 0.5f;
+	float len = length(light_pos_es.xyz - pos_es);	
+	return ESMDirectional(pos_es, light_proj_pos.xy, len, light_attrib.z > 0, light_attrib.w > 0, filtered_shadow_map_2d_light_index,
+		esm_scale_factor);
 }
 
-float4 DeferredShadowingSunPS(
-#ifdef NOPERSPECTIVE_SUPPORT
-	noperspective float2 tc : TEXCOORD0,
-#else
-	float3 tc_w : TEXCOORD0,
-#endif
+float4 DeferredShadowingDirectionalPS(
+	SS_TEXCOORD_TYPE ss_tc : TEXCOORD0,
 	float3 view_dir : TEXCOORD1) : SV_Target
 {
-#ifndef NOPERSPECTIVE_SUPPORT
-	float2 tc = tc_w.xy / tc_w.z;
-#endif
+	float2 tc = DecodeSSTexcoord(ss_tc);
 
 	view_dir = normalize(view_dir);
-	float3 pos_es = view_dir * (ReadAFloat(depth_tex.Sample(point_sampler, tc), depth_near_far_invfar.y) / view_dir.z);
+	float3 pos_es = view_dir * (depth_tex.Sample(point_sampler, tc).x / view_dir.z);
+	float2 light_proj_pos = mul(float4(pos_es, 1), light_view_proj).xy;
+	light_proj_pos.y *= -1;
+	light_proj_pos = light_proj_pos * 0.5f + 0.5f;
+	float4 tc_ddx_ddy = float4(ddx(light_proj_pos), ddy(light_proj_pos));
 	float len = dot(float4(pos_es, 1), view_z_to_light_view);
-	return ESM_Sun(pos_es, len);
+	return ESMSun(pos_es, light_proj_pos, tc_ddx_ddy, len, esm_scale_factor);
 }
 		]]>
 	</shader>
@@ -663,7 +536,7 @@ float4 DeferredShadowingSunPS(
 		</pass>
 	</technique>
 
-	<technique name="DeferredRenderingSun" inherit="DeferredRenderingPoint">
+	<technique name="DeferredRenderingDirectional" inherit="DeferredRenderingPoint">
 		<pass name="p0">
 			<state name="front_stencil_func" value="equal"/>
 			<state name="front_stencil_pass" value="keep"/>
@@ -673,18 +546,12 @@ float4 DeferredShadowingSunPS(
 			<state name="back_stencil_pass" value="keep"/>
 			<state name="back_stencil_read_mask" value="128"/>
 			<state name="back_stencil_write_mask" value="0"/>
-			
-			<state name="pixel_shader" value="DeferredRenderingSunPS()"/>
-		</pass>
-	</technique>
 
-	<technique name="DeferredRenderingDirectional" inherit="DeferredRenderingSun">
-		<pass name="p0">			
 			<state name="pixel_shader" value="DeferredRenderingDirectionalPS()"/>
 		</pass>
 	</technique>
 			
-	<technique name="DeferredRenderingAmbient" inherit="DeferredRenderingSun">
+	<technique name="DeferredRenderingAmbient" inherit="DeferredRenderingDirectional">
 		<pass name="p0">
 			<state name="blend_enable" value="false"/>
 
@@ -764,27 +631,27 @@ float4 DeferredShadowingSunPS(
 		</pass>
 	</technique>
 
-	<technique name="DeferredShadowingSun" inherit="DeferredShadowingPoint">
+	<technique name="DeferredShadowingDirectional" inherit="DeferredShadowingPoint">
 		<pass name="p0">
-			<state name="pixel_shader" value="DeferredShadowingSunPS()"/>
+			<state name="pixel_shader" value="DeferredShadowingDirectionalPS()"/>
 		</pass>
 	</technique>
-	<technique name="DeferredShadowingSunR" inherit="DeferredShadowingSun">
+	<technique name="DeferredShadowingDirectionalR" inherit="DeferredShadowingDirectional">
 		<pass name="p0">
 			<state name="color_write_mask" value="1"/>
 		</pass>
 	</technique>
-	<technique name="DeferredShadowingSunG" inherit="DeferredShadowingSunR">
+	<technique name="DeferredShadowingDirectionalG" inherit="DeferredShadowingDirectionalR">
 		<pass name="p0">
 			<state name="color_write_mask" value="2"/>
 		</pass>
 	</technique>
-	<technique name="DeferredShadowingSunB" inherit="DeferredShadowingSunR">
+	<technique name="DeferredShadowingDirectionalB" inherit="DeferredShadowingDirectionalR">
 		<pass name="p0">
 			<state name="color_write_mask" value="4"/>
 		</pass>
 	</technique>
-	<technique name="DeferredShadowingSunA" inherit="DeferredShadowingSunR">
+	<technique name="DeferredShadowingDirectionalA" inherit="DeferredShadowingDirectionalR">
 		<pass name="p0">
 			<state name="color_write_mask" value="8"/>
 		</pass>
@@ -792,14 +659,15 @@ float4 DeferredShadowingSunPS(
 
 
 	<parameter type="texture2D" name="lighting_tex"/>
-	<parameter type="texture2D" name="g_buffer_1_tex"/>
+	<parameter type="texture2D" name="g_buffer_rt1_tex"/>
+	<parameter type="texture2D" name="g_buffer_rt2_tex"/>
 	<parameter type="texture2D" name="shading_tex"/>
+	<parameter type="texture2DMS" name="shading_tex_ms"/>
 
 	<parameter type="float2" name="near_q"/>
 
 	<parameter type="float4x4" name="inv_view"/>
 	<parameter type="int3" name="skylight_diff_spec_mip"/>
-	<parameter type="float" name="skylight_mip_bias"/>
 	<parameter type="textureCUBE" name="skylight_y_cube_tex"/>
 	<parameter type="textureCUBE" name="skylight_c_cube_tex"/>
 	<parameter type="sampler" name="skylight_sampler">
@@ -811,29 +679,24 @@ float4 DeferredShadowingSunPS(
 
 	<shader>
 		<![CDATA[
-float4 SkylightShading(float shininess, float4 mrt1, float3 normal, float3 view)
+float4 SkylightShading(float glossiness, float3 c_diff, float3 c_spec, float3 normal, float3 view)
 {
 	float4 shading = 0;
 	
 	if (skylight_diff_spec_mip.z)
 	{
-		float3 c_diff = GetDiffuse(mrt1);
-		float c_spec = GetSpecular(mrt1);
-		
 		normal = mul(normal, (float3x3)inv_view);
 		view = mul(view, (float3x3)inv_view);
 
-		float3 prefiltered_clr = decode_hdr_yc(TexCubeSampleLevel(skylight_y_cube_tex, skylight_sampler, normal, skylight_diff_spec_mip.x, 0).r,
-			TexCubeSampleLevel(skylight_c_cube_tex, skylight_sampler, normal, skylight_diff_spec_mip.x, 0)).xyz;
-		shading.xyz + CalcEnvDiffuse(prefiltered_clr, c_diff);
-		
-		shininess = log2(shininess) / 13; // log2(8192) == 13
-	
-		float mip = CalcPrefilteredEnvMip(shininess, skylight_diff_spec_mip.y);
+		float3 prefiltered_clr = decode_hdr_yc(skylight_y_cube_tex.SampleLevel(skylight_sampler, normal, skylight_diff_spec_mip.x).r,
+			skylight_c_cube_tex.SampleLevel(skylight_sampler, normal, skylight_diff_spec_mip.x)).xyz;
+		shading.xyz += CalcEnvDiffuse(prefiltered_clr, c_diff);
+
+		float mip = CalcPrefilteredEnvMip(glossiness, skylight_diff_spec_mip.y);
 		float3 r = CalcPrefilteredEnvVec(normal, view);
-		prefiltered_clr = decode_hdr_yc(TexCubeSampleLevel(skylight_y_cube_tex, skylight_sampler, r, mip, skylight_mip_bias).r,
-			TexCubeSampleLevel(skylight_c_cube_tex, skylight_sampler, r, mip, skylight_mip_bias)).xyz;
-		shading.xyz += CalcEnvSpecular(prefiltered_clr, c_spec, shininess, normal, view);
+		prefiltered_clr = decode_hdr_yc(skylight_y_cube_tex.SampleLevel(skylight_sampler, r, mip).r,
+			skylight_c_cube_tex.SampleLevel(skylight_sampler, r, mip)).xyz;
+		shading.xyz += CalcEnvSpecular(prefiltered_clr, c_spec, glossiness, normal, view);
 	}
 	
 	return shading;
@@ -854,30 +717,51 @@ void ShadingVS(float4 pos : POSITION,
 
 float4 NoLightingPS(float2 tc : TEXCOORD0) : SV_Target
 {
-	return g_buffer_1_tex.Sample(point_sampler, tc);
+	return g_buffer_rt1_tex.Sample(point_sampler, tc);
 }
 
 float4 ShadingPS(float2 tc : TEXCOORD0, float3 view_dir : TEXCOORD1) : SV_Target
 {
-	float4 ndc = g_buffer_tex.Sample(point_sampler, tc);
-	float shininess = GetShininess(ndc);
-	float3 normal = GetNormal(ndc);
+	float4 rt0 = g_buffer_rt0_tex.Sample(point_sampler, tc);
+	float glossiness = GetGlossiness(rt0);
+	float shininess = Glossiness2Shininess(glossiness);
+	float3 normal = GetNormal(rt0);
 	
 	float4 lighting = lighting_tex.Sample(point_sampler, tc);
-	float4 mrt1 = g_buffer_1_tex.Sample(point_sampler, tc);
-	float4 shading = float4(Shading(lighting, shininess, GetDiffuse(mrt1), GetSpecular(mrt1), view_dir, normal), 1);
-	shading += SkylightShading(shininess, mrt1, normal, view_dir);
-	return shading;
+	float4 rt1 = g_buffer_rt1_tex.Sample(point_sampler, tc);
+	float3 c_diff = GetDiffuse(rt1);
+	float3 c_spec = GetSpecular(rt1);
+	float4 shading = float4(CalcShading(lighting, shininess, c_diff, c_spec, view_dir, normal), 1);
+	shading += SkylightShading(glossiness, c_diff, c_spec, normal, view_dir);
+
+	float4 rt2 = g_buffer_rt2_tex.Sample(point_sampler, tc);
+	float occlusion = GetOcclusion(rt2);
+	
+	return shading * float4(occlusion.xxx, 1);
 }
 
-float4 MergeShadingPS(float2 tc : TEXCOORD0) : SV_Target
+float4 MergeShadingPS(float2 tc : TEXCOORD0, uint sample_index : SV_SampleIndex) : SV_Target
 {
+#if KLAYGE_EXPLICIT_MULTI_SAMPLE_SUPPORT && MULTI_SAMPLE_INPUT
+	uint width, height, samples;
+	shading_tex_ms.GetDimensions(width, height, samples);
+	int2 coord = tc * int2(width, height);
+	return shading_tex_ms.Load(coord, sample_index);
+#else
 	return shading_tex.Sample(point_sampler, tc);
+#endif
 }
 
-float4 MergeDepthPS(float2 tc : TEXCOORD0) : SV_Target
+float4 MergeDepthPS(float2 tc : TEXCOORD0, uint sample_index : SV_SampleIndex) : SV_Target
 {
+#if KLAYGE_EXPLICIT_MULTI_SAMPLE_SUPPORT && MULTI_SAMPLE_INPUT
+	uint width, height, samples;
+	depth_tex_ms.GetDimensions(width, height, samples);
+	int2 coord = tc * int2(width, height);
+	return depth_tex_ms.Load(coord, sample_index);
+#else
 	return depth_tex.Sample(point_sampler, tc);
+#endif
 }
 
 #if !KLAYGE_OPENGLES
@@ -885,26 +769,13 @@ void CopyShadingDepthPS(float2 tc : TEXCOORD0,
 		out float4 oClr : SV_Target0, out float oDepth : SV_Depth)
 {
 	oClr = shading_tex.Sample(point_sampler, tc);
-	oDepth = linear_depth_to_non_linear(ReadAFloat(depth_tex.Sample(point_sampler, tc), depth_near_far_invfar.y), near_q.x, near_q.y);
-}
-
-void CopyDepthPS(float2 tc : TEXCOORD0,
-		out float4 oClr : SV_Target0, out float oDepth : SV_Depth)
-{
-	oClr = 0;
-	oDepth = linear_depth_to_non_linear(ReadAFloat(depth_tex.Sample(point_sampler, tc), depth_near_far_invfar.y), near_q.x, near_q.y);
+	oDepth = linear_depth_to_non_linear(depth_tex.Sample(point_sampler, tc).x, near_q.x, near_q.y);
 }
 #else
 void CopyShadingDepthPS(float2 tc : TEXCOORD0,
 		out float4 oClr : SV_Target0)
 {
 	oClr = shading_tex.Sample(point_sampler, tc);
-}
-
-void CopyDepthPS(float2 tc : TEXCOORD0,
-		out float4 oClr : SV_Target0)
-{
-	oClr = 0;
 }
 #endif
 		]]>
@@ -918,13 +789,15 @@ void CopyDepthPS(float2 tc : TEXCOORD0,
 			<state name="cull_mode" value="front"/>
 
 			<state name="front_stencil_enable" value="true"/>
-			<state name="front_stencil_func" value="equal"/>
-			<state name="front_stencil_ref" value="128"/>
+			<state name="front_stencil_func" value="not_equal"/>
+			<state name="front_stencil_ref" value="0"/>
 			<state name="front_stencil_pass" value="keep"/>
+			<state name="front_stencil_read_mask" value="144"/>	<!--128 is no lighting, 16 is transparent-->
 			<state name="back_stencil_enable" value="true"/>
-			<state name="back_stencil_func" value="equal"/>
-			<state name="back_stencil_ref" value="128"/>
+			<state name="back_stencil_func" value="not_equal"/>
+			<state name="back_stencil_ref" value="0"/>
 			<state name="back_stencil_pass" value="keep"/>
+			<state name="back_stencil_read_mask" value="144"/>
 
 			<state name="vertex_shader" value="ShadingVS()"/>
 			<state name="pixel_shader" value="NoLightingPS()"/>
@@ -952,16 +825,6 @@ void CopyDepthPS(float2 tc : TEXCOORD0,
 		</pass>
 	</technique>
 
-	<technique name="MergeShadingTech">
-		<pass name="p0">
-			<state name="cull_mode" value="front"/>
-			<state name="depth_enable" value="false"/>
-			<state name="depth_write_mask" value="false"/>
-
-			<state name="vertex_shader" value="ShadingVS()"/>
-			<state name="pixel_shader" value="MergeShadingPS()"/>
-		</pass>
-	</technique>
 	<technique name="MergeShadingAlphaBlendTech">
 		<pass name="p0">
 			<state name="cull_mode" value="front"/>
@@ -978,35 +841,42 @@ void CopyDepthPS(float2 tc : TEXCOORD0,
 
 			<state name="front_stencil_enable" value="true"/>
 			<state name="front_stencil_func" value="not_equal"/>
-			<state name="front_stencil_ref" value="128"/>
+			<state name="front_stencil_ref" value="16"/>
 			<state name="front_stencil_pass" value="keep"/>
 			<state name="back_stencil_enable" value="true"/>
 			<state name="back_stencil_func" value="not_equal"/>
-			<state name="back_stencil_ref" value="128"/>
+			<state name="back_stencil_ref" value="16"/>
 			<state name="back_stencil_pass" value="keep"/>
 
 			<state name="vertex_shader" value="ShadingVS()"/>
 			<state name="pixel_shader" value="MergeShadingPS()"/>
 		</pass>
 	</technique>
-
-	<technique name="MergeDepthTech" inherit="MergeShadingTech">
-		<pass name="p0">			
-			<state name="pixel_shader" value="MergeDepthPS()"/>
-		</pass>
+	<technique name="MergeShadingAlphaBlendMSTech" inherit="MergeShadingAlphaBlendTech">
+		<macro name="MULTI_SAMPLE_INPUT" value="1"/>
 	</technique>
 
-	<technique name="MergeDepthAlphaBlendTech" inherit="MergeDepthTech">
+	<technique name="MergeDepthAlphaBlendTech">
 		<pass name="p0">
+			<state name="cull_mode" value="front"/>
+			<state name="depth_enable" value="false"/>
+			<state name="depth_write_mask" value="false"/>
+
 			<state name="front_stencil_enable" value="true"/>
 			<state name="front_stencil_func" value="not_equal"/>
-			<state name="front_stencil_ref" value="128"/>
+			<state name="front_stencil_ref" value="16"/>
 			<state name="front_stencil_pass" value="keep"/>
 			<state name="back_stencil_enable" value="true"/>
 			<state name="back_stencil_func" value="not_equal"/>
-			<state name="back_stencil_ref" value="128"/>
+			<state name="back_stencil_ref" value="16"/>
 			<state name="back_stencil_pass" value="keep"/>
+
+			<state name="vertex_shader" value="ShadingVS()"/>
+			<state name="pixel_shader" value="MergeDepthPS()"/>
 		</pass>
+	</technique>
+	<technique name="MergeDepthAlphaBlendMSTech" inherit="MergeDepthAlphaBlendTech">
+		<macro name="MULTI_SAMPLE_INPUT" value="1"/>
 	</technique>
 
 	<technique name="CopyShadingDepthTech">
@@ -1017,18 +887,6 @@ void CopyDepthPS(float2 tc : TEXCOORD0,
 
 			<state name="vertex_shader" value="ShadingVS()"/>
 			<state name="pixel_shader" value="CopyShadingDepthPS()"/>
-		</pass>
-	</technique>
-	<technique name="CopyDepthTech">
-		<pass name="p0">
-			<state name="cull_mode" value="front"/>
-			<state name="depth_enable" value="true"/>
-			<state name="depth_func" value="always_pass"/>
-
-			<state name="color_write_mask" value="0"/>
-
-			<state name="vertex_shader" value="ShadingVS()"/>
-			<state name="pixel_shader" value="CopyDepthPS()"/>
 		</pass>
 	</technique>
 </effect>

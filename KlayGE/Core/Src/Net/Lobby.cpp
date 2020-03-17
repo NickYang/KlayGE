@@ -20,8 +20,6 @@
 #include <KlayGE/NetMsg.hpp>
 #include <KlayGE/Lobby.hpp>
 
-#ifndef KLAYGE_PLATFORM_WINDOWS_RUNTIME
-
 namespace KlayGE
 {
 	// 构造函数
@@ -132,16 +130,8 @@ namespace KlayGE
 	/////////////////////////////////////////////////////////////////////////////////
 	char Lobby::NumPlayer() const
 	{
-		char n = 0;
-		for (auto const & player : players_)
-		{
-			if (player.first != 0)
-			{
-				++ n;
-			}
-		}
-
-		return n;
+		return static_cast<char>(std::count_if(
+			players_.begin(), players_.end(), [](std::pair<uint32_t, PlayerDes> const& player) { return (player.first != 0); }));
 	}
 
 	// 设置大厅名称
@@ -274,7 +264,7 @@ namespace KlayGE
 		//			最大Players数	1 字节
 		//			Lobby名字		16 字节
 
-		std::fill_n(sendBuf, 18, 0);
+		memset(sendBuf, 0, 18);
 		sendBuf[0] = this->NumPlayer();
 		sendBuf[1] = this->MaxPlayers();
 		this->LobbyName().copy(&sendBuf[2], this->LobbyName().length());
@@ -289,5 +279,3 @@ namespace KlayGE
 		}
 	}
 }
-
-#endif

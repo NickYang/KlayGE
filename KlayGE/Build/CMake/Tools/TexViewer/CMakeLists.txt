@@ -1,0 +1,3 @@
+ADD_SUBDIRECTORY(TexViewer)
+ADD_SUBDIRECTORY(TexViewerCore)
+ADD_SUBDIRECTORY(TexViewerCoreWrapper)

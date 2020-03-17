@@ -11,7 +11,6 @@
 /////////////////////////////////////////////////////////////////////////////////
 
 #include <KlayGE/KlayGE.hpp>
-#include <KFL/ThrowErr.hpp>
 #include <KFL/Math.hpp>
 #include <KlayGE/Context.hpp>
 #include <KlayGE/Texture.hpp>
@@ -32,9 +31,6 @@ namespace KlayGE
 {
 	OGLESFrameBuffer::OGLESFrameBuffer(bool off_screen)
 	{
-		left_ = 0;
-		top_ = 0;
-
 		if (off_screen)
 		{
 			glGenFramebuffers(1, &fbo_);
@@ -51,7 +47,7 @@ namespace KlayGE
 		{
 			if (Context::Instance().RenderFactoryValid())
 			{
-				OGLESRenderEngine& re = *checked_cast<OGLESRenderEngine*>(&Context::Instance().RenderFactoryInstance().RenderEngineInstance());
+				auto& re = checked_cast<OGLESRenderEngine&>(Context::Instance().RenderFactoryInstance().RenderEngineInstance());
 				re.DeleteFramebuffers(1, &fbo_);
 			}
 			else
@@ -69,49 +65,56 @@ namespace KlayGE
 
 	void OGLESFrameBuffer::OnBind()
 	{
-		OGLESRenderEngine& re = *checked_cast<OGLESRenderEngine*>(&Context::Instance().RenderFactoryInstance().RenderEngineInstance());
+		if (views_dirty_)
+		{
+			if (fbo_ != 0)
+			{
+				gl_targets_.resize(rt_views_.size());
+				for (size_t i = 0; i < rt_views_.size(); ++ i)
+				{
+					gl_targets_[i] = static_cast<GLenum>(GL_COLOR_ATTACHMENT0 + i);
+				}
+			}
+			else
+			{
+				gl_targets_.resize(1);
+				gl_targets_[0] = GL_BACK;
+			}
+
+			views_dirty_ = false;
+		}
+
+		auto& re = checked_cast<OGLESRenderEngine&>(Context::Instance().RenderFactoryInstance().RenderEngineInstance());
 		re.BindFramebuffer(fbo_);
 
 		BOOST_ASSERT(GL_FRAMEBUFFER_COMPLETE == glCheckFramebufferStatus(GL_FRAMEBUFFER));
 
-		if (glloader_GLES_VERSION_3_0())
-		{
-			if (fbo_ != 0)
-			{
-				std::vector<GLenum> targets(clr_views_.size());
-				for (size_t i = 0; i < clr_views_.size(); ++ i)
-				{
-					targets[i] = static_cast<GLenum>(GL_COLOR_ATTACHMENT0 + i);
-				}
-				glDrawBuffers(static_cast<GLsizei>(targets.size()), &targets[0]);
-			}
-			else
-			{
-				GLenum targets[] = { GL_BACK };
-				glDrawBuffers(1, &targets[0]);
-			}
-		}
+		glDrawBuffers(static_cast<GLsizei>(gl_targets_.size()), &gl_targets_[0]);
+	}
+
+	void OGLESFrameBuffer::OnUnbind()
+	{
 	}
 
 	void OGLESFrameBuffer::Clear(uint32_t flags, Color const & clr, float depth, int32_t stencil)
 	{
-		OGLESRenderEngine& re = *checked_cast<OGLESRenderEngine*>(&Context::Instance().RenderFactoryInstance().RenderEngineInstance());
+		auto& re = checked_cast<OGLESRenderEngine&>(Context::Instance().RenderFactoryInstance().RenderEngineInstance());
 
 		GLuint old_fbo = re.BindFramebuffer();
 		re.BindFramebuffer(fbo_);
 
-		bool has_color = (flags & CBM_Color) && !!this->Attached(ATT_Color0);
+		bool has_color = (flags & CBM_Color) && !!this->AttachedRtv(Attachment::Color0);
 		bool has_depth = false;
 		bool has_stencil = false;
-		RenderViewPtr const & ds_view = this->Attached(ATT_DepthStencil);
+		auto const & ds_view = this->AttachedDsv();
 		if (ds_view)
 		{
 			has_depth = (flags & CBM_Depth) && IsDepthFormat(ds_view->Format());
 			has_stencil = (flags & CBM_Stencil) && IsStencilFormat(ds_view->Format());
 		}
 
-		DepthStencilStateDesc const & ds_desc = re.CurDSSObj()->GetDesc();
-		BlendStateDesc const & blend_desc = re.CurBSObj()->GetDesc();
+		DepthStencilStateDesc const & ds_desc = re.CurRenderStateObject()->GetDepthStencilStateDesc();
+		BlendStateDesc const & blend_desc = re.CurRenderStateObject()->GetBlendStateDesc();
 
 		if (has_color)
 		{
@@ -139,63 +142,39 @@ namespace KlayGE
 			}
 		}
 
-		if (glloader_GLES_VERSION_3_0())
+		if (flags & CBM_Color)
 		{
-			if (flags & CBM_Color)
+			if (fbo_ != 0)
 			{
-				if (fbo_ != 0)
+				for (size_t i = 0; i < rt_views_.size(); ++ i)
 				{
-					for (size_t i = 0; i < clr_views_.size(); ++ i)
+					if (rt_views_[i])
 					{
-						if (clr_views_[i])
-						{
-							glClearBufferfv(GL_COLOR, static_cast<GLint>(i), &clr[0]);
-						}
+						glClearBufferfv(GL_COLOR, static_cast<GLint>(i), &clr[0]);
 					}
 				}
-				else
-				{
-					glClearBufferfv(GL_COLOR, 0, &clr[0]);
-				}
-			}
-
-			if (has_depth && has_stencil)
-			{
-				glClearBufferfi(GL_DEPTH_STENCIL, 0, depth, stencil);
 			}
 			else
 			{
-				if (has_depth)
-				{
-					glClearBufferfv(GL_DEPTH, 0, &depth);
-				}
-				else if (has_stencil)
-				{
-					GLint s = stencil;
-					glClearBufferiv(GL_STENCIL, 0, &s);
-				}
+				glClearBufferfv(GL_COLOR, 0, &clr[0]);
 			}
+		}
+
+		if (has_depth && has_stencil)
+		{
+			glClearBufferfi(GL_DEPTH_STENCIL, 0, depth, stencil);
 		}
 		else
 		{
-			GLbitfield ogl_flags = 0;
-			if (has_color)
-			{
-				ogl_flags |= GL_COLOR_BUFFER_BIT;
-				re.ClearColor(clr.r(), clr.g(), clr.b(), clr.a());
-			}
 			if (has_depth)
 			{
-				ogl_flags |= GL_DEPTH_BUFFER_BIT;
-				re.ClearDepth(depth);
+				glClearBufferfv(GL_DEPTH, 0, &depth);
 			}
-			if (has_stencil)
+			else if (has_stencil)
 			{
-				ogl_flags |= GL_STENCIL_BUFFER_BIT;
-				re.ClearStencil(stencil);
+				GLint s = stencil;
+				glClearBufferiv(GL_STENCIL, 0, &s);
 			}
-
-			glClear(ogl_flags);
 		}
 
 		if (flags & CBM_Color)
@@ -232,71 +211,57 @@ namespace KlayGE
 
 	void OGLESFrameBuffer::Discard(uint32_t flags)
 	{
-		if (glloader_GLES_VERSION_3_0() || glloader_GLES_EXT_discard_framebuffer())
+		std::vector<GLenum> attachments;
+		if (fbo_ != 0)
 		{
-			std::vector<GLenum> attachments;
-			if (fbo_ != 0)
+			if (flags & CBM_Color)
 			{
-				if (flags & CBM_Color)
+				for (size_t i = 0; i < rt_views_.size(); ++ i)
 				{
-					for (size_t i = 0; i < clr_views_.size(); ++ i)
+					if (rt_views_[i])
 					{
-						if (clr_views_[i])
-						{
-							attachments.push_back(static_cast<GLenum>(GL_COLOR_ATTACHMENT0 + i));
-						}
-					}
-				}
-				if (flags & CBM_Depth)
-				{
-					if (rs_view_)
-					{
-						attachments.push_back(GL_DEPTH_ATTACHMENT);
-					}
-				}
-				if (flags & CBM_Stencil)
-				{
-					if (rs_view_)
-					{
-						attachments.push_back(GL_STENCIL_ATTACHMENT);
+						attachments.push_back(static_cast<GLenum>(GL_COLOR_ATTACHMENT0 + i));
 					}
 				}
 			}
-			else
+			if (flags & CBM_Depth)
 			{
-				if (flags & CBM_Color)
+				if (ds_view_)
 				{
-					attachments.push_back(GL_COLOR);
-				}
-				if (flags & CBM_Depth)
-				{
-					attachments.push_back(GL_DEPTH);
-				}
-				if (flags & CBM_Stencil)
-				{
-					attachments.push_back(GL_STENCIL);
+					attachments.push_back(GL_DEPTH_ATTACHMENT);
 				}
 			}
-
-			OGLESRenderEngine& re = *checked_cast<OGLESRenderEngine*>(&Context::Instance().RenderFactoryInstance().RenderEngineInstance());
-
-			GLuint old_fbo = re.BindFramebuffer();
-			re.BindFramebuffer(fbo_);
-
-			if (glloader_GLES_VERSION_3_0())
+			if (flags & CBM_Stencil)
 			{
-				glInvalidateFramebuffer(GL_FRAMEBUFFER, static_cast<GLsizei>(attachments.size()), &attachments[0]);
+				if (ds_view_)
+				{
+					attachments.push_back(GL_STENCIL_ATTACHMENT);
+				}
 			}
-			else
-			{
-				glDiscardFramebufferEXT(GL_FRAMEBUFFER, static_cast<GLsizei>(attachments.size()), &attachments[0]);
-			}
-
-			re.BindFramebuffer(old_fbo);
 		}
 		else
 		{
-			this->Clear(flags, Color(0, 0, 0, 0), 1, 0);
+			if (flags & CBM_Color)
+			{
+				attachments.push_back(GL_COLOR);
+			}
+			if (flags & CBM_Depth)
+			{
+				attachments.push_back(GL_DEPTH);
+			}
+			if (flags & CBM_Stencil)
+			{
+				attachments.push_back(GL_STENCIL);
+			}
 		}
+
+		auto& re = checked_cast<OGLESRenderEngine&>(Context::Instance().RenderFactoryInstance().RenderEngineInstance());
+
+		GLuint old_fbo = re.BindFramebuffer();
+		re.BindFramebuffer(fbo_);
+
+		glInvalidateFramebuffer(GL_FRAMEBUFFER, static_cast<GLsizei>(attachments.size()), &attachments[0]);
+
+		re.BindFramebuffer(old_fbo);
 	}
 }

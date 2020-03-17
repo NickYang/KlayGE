@@ -46,20 +46,17 @@ namespace KlayGE
 	typedef std::shared_ptr<PerfProfiler> PerfProfilerPtr;
 
 	class SceneManager;
-	typedef std::shared_ptr<SceneManager> SceneManagerPtr;
+	class SceneComponent;
+	using SceneComponentPtr = std::shared_ptr<SceneComponent>;
 	class SceneNode;
-	typedef std::shared_ptr<SceneNode> SceneNodePtr;
-	class SceneObject;
-	typedef std::shared_ptr<SceneObject> SceneObjectPtr;
-	class SceneObjectHelper;
-	typedef std::shared_ptr<SceneObjectHelper> SceneObjectHelperPtr;
-	class SceneObjectSkyBox;
-	typedef std::shared_ptr<SceneObjectSkyBox> SceneObjectSkyBoxPtr;
+	using SceneNodePtr = std::shared_ptr<SceneNode>;
 	class SceneObjectLightSourceProxy;
-	typedef std::shared_ptr<SceneObjectLightSourceProxy> SceneObjectLightSourceProxyPtr;
+	using SceneObjectLightSourceProxyPtr = std::shared_ptr<SceneObjectLightSourceProxy>;
 	class SceneObjectCameraProxy;
-	typedef std::shared_ptr<SceneObjectCameraProxy> SceneObjectCameraProxyPtr;
+	using SceneObjectCameraProxyPtr = std::shared_ptr<SceneObjectCameraProxy>;
 
+	class Blitter;
+	typedef std::shared_ptr<Blitter> BlitterPtr;
 	struct ElementInitData;
 	class Camera;
 	typedef std::shared_ptr<Camera> CameraPtr;
@@ -74,14 +71,13 @@ namespace KlayGE
 	class Font;
 	typedef std::shared_ptr<Font> FontPtr;
 	class RenderEngine;
-	typedef std::shared_ptr<RenderEngine> RenderEnginePtr;
 	struct RenderSettings;
-	struct RenderMaterial;
+	class RenderMaterial;
 	typedef std::shared_ptr<RenderMaterial> RenderMaterialPtr;
 	class Renderable;
 	typedef std::shared_ptr<Renderable> RenderablePtr;
-	class RenderableHelper;
-	typedef std::shared_ptr<RenderableHelper> RenderableHelperPtr;
+	class RenderableComponent;
+	typedef std::shared_ptr<RenderableComponent> RenderableComponentPtr;
 	class RenderablePoint;
 	typedef std::shared_ptr<RenderablePoint> RenderablePointPtr;
 	class RenderableLine;
@@ -100,30 +96,28 @@ namespace KlayGE
 	typedef std::shared_ptr<RenderDecal> RenderDecalPtr;
 	class RenderEffect;
 	typedef std::shared_ptr<RenderEffect> RenderEffectPtr;
+	class RenderEffectTemplate;
+	typedef std::shared_ptr<RenderEffectTemplate> RenderEffectTemplatePtr;
 	class RenderTechnique;
-	typedef std::shared_ptr<RenderTechnique> RenderTechniquePtr;
 	class RenderPass;
 	typedef std::shared_ptr<RenderPass> RenderPassPtr;
 	class RenderEffectConstantBuffer;
 	typedef std::shared_ptr<RenderEffectConstantBuffer> RenderEffectConstantBufferPtr;
 	class RenderEffectParameter;
-	typedef std::shared_ptr<RenderEffectParameter> RenderEffectParameterPtr;
 	class RenderVariable;
-	typedef std::shared_ptr<RenderVariable> RenderVariablePtr;
+	class RenderEffectStructType;
 	class RenderEffectAnnotation;
 	typedef std::shared_ptr<RenderEffectAnnotation> RenderEffectAnnotationPtr;
 	struct RasterizerStateDesc;
 	struct DepthStencilStateDesc;
 	struct BlendStateDesc;
 	struct SamplerStateDesc;
-	class RasterizerStateObject;
-	typedef std::shared_ptr<RasterizerStateObject> RasterizerStateObjectPtr;
-	class DepthStencilStateObject;
-	typedef std::shared_ptr<DepthStencilStateObject> DepthStencilStateObjectPtr;
-	class BlendStateObject;
-	typedef std::shared_ptr<BlendStateObject> BlendStateObjectPtr;
+	class RenderStateObject;
+	typedef std::shared_ptr<RenderStateObject> RenderStateObjectPtr;
 	class SamplerStateObject;
 	typedef std::shared_ptr<SamplerStateObject> SamplerStateObjectPtr;
+	class ShaderStageObject;
+	typedef std::shared_ptr<ShaderStageObject> ShaderStageObjectPtr;
 	class ShaderObject;
 	typedef std::shared_ptr<ShaderObject> ShaderObjectPtr;
 	class Texture;
@@ -160,8 +154,12 @@ namespace KlayGE
 	typedef std::shared_ptr<JudaTexture> JudaTexturePtr;
 	class FrameBuffer;
 	typedef std::shared_ptr<FrameBuffer> FrameBufferPtr;
-	class RenderView;
-	typedef std::shared_ptr<RenderView> RenderViewPtr;
+	class ShaderResourceView;
+	typedef std::shared_ptr<ShaderResourceView> ShaderResourceViewPtr;
+	class RenderTargetView;
+	typedef std::shared_ptr<RenderTargetView> RenderTargetViewPtr;
+	class DepthStencilView;
+	typedef std::shared_ptr<DepthStencilView> DepthStencilViewPtr;
 	class UnorderedAccessView;
 	typedef std::shared_ptr<UnorderedAccessView> UnorderedAccessViewPtr;
 	class GraphicsBuffer;
@@ -170,10 +168,9 @@ namespace KlayGE
 	typedef std::shared_ptr<RenderLayout> RenderLayoutPtr;
 	class RenderGraphicsBuffer;
 	typedef std::shared_ptr<RenderGraphicsBuffer> RenderGraphicsBufferPtr;
-	struct Viewport;
+	class Viewport;
 	typedef std::shared_ptr<Viewport> ViewportPtr;
 	class RenderFactory;
-	typedef std::shared_ptr<RenderFactory> RenderFactoryPtr;
 	class RenderModel;
 	typedef std::shared_ptr<RenderModel> RenderModelPtr;
 	class StaticMesh;
@@ -196,8 +193,6 @@ namespace KlayGE
 	typedef std::shared_ptr<SpotLightSource> SpotLightSourcePtr;
 	class DirectionalLightSource;
 	typedef std::shared_ptr<DirectionalLightSource> DirectionalLightSourcePtr;
-	class SunLightSource;
-	typedef std::shared_ptr<SunLightSource> SunLightSourcePtr;
 	class SphereAreaLightSource;
 	typedef std::shared_ptr<SphereAreaLightSource> SphereAreaLightSourcePtr;
 	class TubeAreaLightSource;
@@ -209,6 +204,10 @@ namespace KlayGE
 	typedef std::shared_ptr<OcclusionQuery> OcclusionQueryPtr;
 	class ConditionalRender;
 	typedef std::shared_ptr<ConditionalRender> ConditionalRenderPtr;
+	class TimerQuery;
+	typedef std::shared_ptr<TimerQuery> TimerQueryPtr;
+	class SOStatisticsQuery;
+	typedef std::shared_ptr<SOStatisticsQuery> SOStatisticsQueryPtr;
 	class PostProcess;
 	typedef std::shared_ptr<PostProcess> PostProcessPtr;
 	class PostProcessChain;
@@ -239,8 +238,6 @@ namespace KlayGE
 	typedef std::shared_ptr<LensEffectsPostProcess> LensEffectsPostProcessPtr;
 	class LensEffectsPostProcessCS;
 	typedef std::shared_ptr<LensEffectsPostProcessCS> LensEffectsPostProcessCSPtr;
-	class ToneMappingPostProcess;
-	typedef std::shared_ptr<ToneMappingPostProcess> ToneMappingPostProcessPtr;
 	class HDRPostProcess;
 	typedef std::shared_ptr<HDRPostProcess> HDRPostProcessPtr;
 	class SATSeparableScanSweepPostProcess;
@@ -249,8 +246,6 @@ namespace KlayGE
 	typedef std::shared_ptr<SATPostProcess> SATPostProcessPtr;
 	class SATPostProcessCS;
 	typedef std::shared_ptr<SATPostProcessCS> SATPostProcessCSPtr;
-	class TAAPostProcess;
-	typedef std::shared_ptr<TAAPostProcess> TAAPostProcessPtr;
 	class SSVOPostProcess;
 	typedef std::shared_ptr<SSVOPostProcess> SSVOPostProcessPtr;
 	struct Particle;
@@ -263,18 +258,17 @@ namespace KlayGE
 	typedef std::shared_ptr<ParticleSystem> ParticleSystemPtr;
 	class InfTerrainRenderable;
 	typedef std::shared_ptr<InfTerrainRenderable> InfTerrainRenderablePtr;
-	class InfTerrainSceneObject;
-	typedef std::shared_ptr<InfTerrainSceneObject> InfTerrainSceneObjectPtr;
+	class InfTerrainRenderableComponent;
+	typedef std::shared_ptr<InfTerrainRenderableComponent> InfTerrainRenderableComponentPtr;
 	class HQTerrainRenderable;
 	typedef std::shared_ptr<HQTerrainRenderable> HQTerrainRenderablePtr;
-	class HQTerrainSceneObject;
-	typedef std::shared_ptr<HQTerrainSceneObject> HQTerrainSceneObjectPtr;
+	class HQTerrainRenderableComponent;
+	typedef std::shared_ptr<HQTerrainRenderableComponent> HQTerrainRenderableComponentPtr;
 	class LensFlareRenderable;
 	typedef std::shared_ptr<LensFlareRenderable> LensFlareRenderablePtr;
-	class LensFlareSceneObject;
-	typedef std::shared_ptr<LensFlareSceneObject> LensFlareSceneObjectPtr;
+	class LensFlareRenderableComponent;
+	typedef std::shared_ptr<LensFlareRenderableComponent> LensFlareRenderableComponentPtr;
 	class DeferredRenderingLayer;
-	typedef std::shared_ptr<DeferredRenderingLayer> DeferredRenderingLayerPtr;
 	class MultiResLayer;
 	typedef std::shared_ptr<MultiResLayer> MultiResLayerPtr;
 	class IndirectLightingLayer;
@@ -307,9 +301,10 @@ namespace KlayGE
 	typedef std::shared_ptr<TransientBuffer> TransientBufferPtr;
 	class Fence;
 	typedef std::shared_ptr<Fence> FencePtr;
+	class Imposter;
+	typedef std::shared_ptr<Imposter> ImposterPtr;
 
 	class UIManager;
-	typedef std::shared_ptr<UIManager> UIManagerPtr;
 	class UIElement;
 	typedef std::shared_ptr<UIElement> UIElementPtr;
 	class UIControl;
@@ -346,7 +341,6 @@ namespace KlayGE
 	class Player;
 
 	class AudioEngine;
-	typedef std::shared_ptr<AudioEngine> AudioEnginePtr;
 	class AudioBuffer;
 	typedef std::shared_ptr<AudioBuffer> AudioBufferPtr;
 	class SoundBuffer;
@@ -354,16 +348,13 @@ namespace KlayGE
 	class AudioDataSource;
 	typedef std::shared_ptr<AudioDataSource> AudioDataSourcePtr;
 	class AudioFactory;
-	typedef std::shared_ptr<AudioFactory> AudioFactoryPtr;
 	class AudioDataSourceFactory;
-	typedef std::shared_ptr<AudioDataSourceFactory> AudioDataSourceFactoryPtr;
 
 	class App3DFramework;
 	class Window;
 	typedef std::shared_ptr<Window> WindowPtr;
 
 	class InputEngine;
-	typedef std::shared_ptr<InputEngine> InputEnginePtr;
 	class InputDevice;
 	typedef std::shared_ptr<InputDevice> InputDevicePtr;
 	class InputKeyboard;
@@ -377,7 +368,6 @@ namespace KlayGE
 	class InputSensor;
 	typedef std::shared_ptr<InputSensor> InputSensorPtr;
 	class InputFactory;
-	typedef std::shared_ptr<InputFactory> InputFactoryPtr;
 	struct InputActionParam;
 	typedef std::shared_ptr<InputActionParam> InputActionParamPtr;
 	struct InputKeyboardActionParam;
@@ -392,14 +382,15 @@ namespace KlayGE
 	typedef std::shared_ptr<InputSensorActionParam> InputSensorActionParamPtr;
 
 	class ShowEngine;
-	typedef std::shared_ptr<ShowEngine> ShowEnginePtr;
 	class ShowFactory;
-	typedef std::shared_ptr<ShowFactory> ShowFactoryPtr;
 
 	class ScriptEngine;
-	typedef std::shared_ptr<ScriptEngine> ScriptEnginePtr;
 	class ScriptFactory;
-	typedef std::shared_ptr<ScriptFactory> ScriptFactoryPtr;
+
+	class Package;
+	typedef std::shared_ptr<Package> PackagePtr;
+
+	class DevHelper;
 }
 
 #endif			// _KLAYGE_PREDECLARE_HPP

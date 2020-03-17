@@ -49,42 +49,11 @@ float4 decode_hdr_yc(float y, float4 c)
 
 float mipmap_level(float2 uv, float2 texture_size)
 {
-#if KLAYGE_DERIVATIVES
 	float2 dx = ddx(uv * texture_size.x);
 	float2 dy = ddy(uv * texture_size.y);
 	float d = max(dot(dx, dx), dot(dy, dy));
 
 	return log2(sqrt(d));
-#else
-	return 0;
-#endif
-}
-
-float4 Tex2DSampleLevel(texture2D tex, sampler sa, float2 tc, float mip, float mip_bias)
-{
-#if defined(KLAYGE_PIXEL_SHADER) && KLAYGE_NO_TEX_LOD
-	return tex.SampleBias(sa, tc, mip + mip_bias + 0.5f);
-#else
-	return tex.SampleLevel(sa, tc, mip);
-#endif
-}
-
-float4 Tex3DSampleLevel(texture3D tex, sampler sa, float3 tc, float mip, float mip_bias)
-{
-#if defined(KLAYGE_PIXEL_SHADER) && KLAYGE_NO_TEX_LOD
-	return tex.SampleBias(sa, tc, mip + mip_bias + 0.5f);
-#else
-	return tex.SampleLevel(sa, tc, mip);
-#endif
-}
-
-float4 TexCubeSampleLevel(textureCUBE tex, sampler sa, float3 tc, float mip, float mip_bias)
-{
-#if defined(KLAYGE_PIXEL_SHADER) && KLAYGE_NO_TEX_LOD
-	return tex.SampleBias(sa, tc, mip + mip_bias + 0.5f);
-#else
-	return tex.SampleLevel(sa, tc, mip);
-#endif
 }
 
 float non_linear_depth_to_linear(float depth, float near_mul_q, float q)
@@ -95,18 +64,6 @@ float non_linear_depth_to_linear(float depth, float near_mul_q, float q)
 float linear_depth_to_non_linear(float depth, float near_mul_q, float q)
 {
 	return (depth * q - near_mul_q) / depth;
-}
-
-float3 linear_to_srgb(float3 rgb)
-{
-	const float ALPHA = 0.055f;
-	return rgb < 0.0031308f ? 12.92f * rgb : (1 + ALPHA) * pow(rgb, 1 / 2.4f) - ALPHA;
-}
-
-float3 srgb_to_linear(float3 srgb)
-{
-	const float ALPHA = 0.055f;
-	return srgb < 0.04045f ? srgb / 12.92f : pow((srgb + ALPHA) / (1 + ALPHA), 2.4f);
 }
 
 // Encoding a [0, 1) float into a rgba8. From http://aras-p.info/blog/2009/07/30/encoding-floats-to-rgba-the-final/
@@ -174,6 +131,53 @@ float2 ReadTwoHalf(float4 v, float scale = 1, float bias = 0)
 }
 
 
+#if !KLAYGE_DXBC2GLSL
+	#define NOPERSPECTIVE_SUPPORT
+#endif
+
+#ifdef NOPERSPECTIVE_SUPPORT
+	#define SS_TEXCOORD_TYPE noperspective float2
+#else
+	#define SS_TEXCOORD_TYPE float3
+#endif
+
+#ifdef NOPERSPECTIVE_SUPPORT
+float2 EncodeSSTexcoord(float4 pos_ss)
+#else
+float3 EncodeSSTexcoord(float4 pos_ss)
+#endif
+{
+#ifdef NOPERSPECTIVE_SUPPORT
+	float2 tc;
+#else
+	float3 tc;
+#endif
+
+	tc.xy = pos_ss.xy / pos_ss.w * 0.5f;
+	tc.y *= KLAYGE_FLIPPING;
+	tc.xy += 0.5f;
+
+#ifndef NOPERSPECTIVE_SUPPORT
+	tc.z = pos_ss.w;
+	tc.xy *= tc.z;
+#endif
+
+	return tc;
+}
+
+#ifdef NOPERSPECTIVE_SUPPORT
+float2 DecodeSSTexcoord(float2 ss_tc)
+{
+	return ss_tc;
+}
+#else
+float2 DecodeSSTexcoord(float3 ss_tc)
+{
+	return ss_tc.xy / ss_tc.z;
+}
+#endif
+
+
 #if KLAYGE_SHADER_MODEL < SHADER_MODEL(5, 0)
 float mad(float mvalue, float avalue, float bvalue)
 {
@@ -209,7 +213,6 @@ float4 rcp(float4 v)
 	return 1 / v;
 }
 
-#if KLAYGE_SHADER_MODEL >= SHADER_MODEL(4, 0)
 uint countbits(uint v)
 {
 	v = v - ((v >> 1) & 0x55555555);
@@ -355,7 +358,6 @@ uint4 reverse(uint4 v)
 	v = (((v & 0xFF00FF00) >> 8) | ((v & 0x00FF00FF) << 8));
 	return (v >> 16) | (v << 16);
 }
-#endif
 #endif
 		]]>
 	</shader>

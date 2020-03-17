@@ -11,11 +11,11 @@
 
 #include <cmath>
 #include <iostream>
-#include <sstream>
 #include <string>
 #include <vector>
 #include <ctime>
 #include <cstring>
+
 #include <boost/assert.hpp>
 
 using namespace std;
@@ -249,18 +249,15 @@ int main(int argc, char* argv[])
 	}
 	if (argc > 3)
 	{
-		std::stringstream ss(argv[3]);
-		ss >> width;
+		width = std::stoi(argv[3]);
 	}
 	if (argc > 4)
 	{
-		std::stringstream ss(argv[4]);
-		ss >> height;
+		height = std::stoi(argv[4]);
 	}
 	if (argc > 5)
 	{
-		std::stringstream ss(argv[5]);
-		ss >> depth;
+		depth = std::stoi(argv[5]);
 	}
 
 	Context::Instance().LoadCfg("KlayGE.cfg");
@@ -278,7 +275,7 @@ int main(int argc, char* argv[])
 	TexturePtr src_texture = SyncLoadTexture(src_name, EAH_CPU_Read | EAH_CPU_Write);
 	if (Texture::TT_2D == src_texture->Type())
 	{
-		TexturePtr height_map_texture = render_factory.MakeTexture2D(width, height, 1, 1, EF_R8, 1, 0, EAH_CPU_Read | EAH_CPU_Write, nullptr);
+		TexturePtr height_map_texture = render_factory.MakeTexture2D(width, height, 1, 1, EF_R8, 1, 0, EAH_CPU_Read | EAH_CPU_Write);
 		src_texture->CopyToTexture(*height_map_texture);
 
 		uint32_t texel_size = NumFormatBytes(height_map_texture->Format());
@@ -316,7 +313,7 @@ int main(int argc, char* argv[])
 	{
 		BOOST_ASSERT(Texture::TT_3D == src_texture->Type());
 
-		TexturePtr vol_map_texture = render_factory.MakeTexture3D(width, height, depth, 1, 1, EF_R8, 1, 0, EAH_CPU_Read | EAH_CPU_Write, nullptr);
+		TexturePtr vol_map_texture = render_factory.MakeTexture3D(width, height, depth, 1, 1, EF_R8, 1, 0, EAH_CPU_Read | EAH_CPU_Write);
 		src_texture->CopyToTexture(*vol_map_texture);
 
 		uint32_t texel_size = NumFormatBytes(vol_map_texture->Format());
@@ -341,7 +338,7 @@ int main(int argc, char* argv[])
 
 	cout << endl << "Computing time: " << clock() - start << " ms" << endl;
 
-	TexturePtr distance_map_texture = render_factory.MakeTexture3D(width, height, depth, 1, 1, EF_R8, 1, 0, EAH_CPU_Read | EAH_CPU_Write, nullptr);
+	TexturePtr distance_map_texture = render_factory.MakeTexture3D(width, height, depth, 1, 1, EF_R8, 1, 0, EAH_CPU_Read | EAH_CPU_Write);
 
 	{
 		uint32_t texel_size = NumFormatBytes(distance_map_texture->Format());

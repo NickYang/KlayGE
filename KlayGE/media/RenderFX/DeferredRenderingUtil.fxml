@@ -1,34 +1,29 @@
 <?xml version='1.0'?>
 
 <effect>
+	<include name="Lighting.fxml"/>
+
 	<shader>
 		<![CDATA[
-float4 StoreGBufferRT0(float3 normal, float shininess)
+void StoreGBuffer(float3 normal, float3 albedo, float2 metalness_glossiness, float2 motion_vec, float occlusion,
+			out float4 rt0, out float4 rt1, out float4 rt2)
 {
 	float p = sqrt(-normal.z * 8 + 8);
 	float2 enc = normal.xy / p + 0.5f;
 	float2 enc255 = enc * 255;
 	float2 residual = floor(frac(enc255) * 16);
-	return float4(float3(floor(enc255), residual.x * 16 + residual.y) / 255, shininess);
+	rt0 = float4(float3(floor(enc255), residual.x * 16 + residual.y) / 255, metalness_glossiness.y);
+
+	rt1 = float4(albedo, metalness_glossiness.x);
+
+	rt2 = float4(motion_vec * 0.5f + 0.5f, occlusion, 1);
 }
 
-float4 StoreGBufferRT1(float3 diffuse, float3 specular)
+float3 GetNormal(float4 rt0)
 {
-	return float4(diffuse, dot(specular, float3(0.2126f, 0.7152f, 0.0722f)));
-}
-
-void StoreGBufferMRT(float3 normal, float3 specular, float shininess, float3 diffuse,
-			out float4 mrt_0, out float4 mrt_1)
-{
-	mrt_0 = StoreGBufferRT0(normal, shininess);
-	mrt_1 = StoreGBufferRT1(diffuse, specular);
-}
-
-float3 GetNormal(float4 mrt0)
-{
-	float nz = floor(mrt0.z * 255) / 16;
-	mrt0.xy += float2(floor(nz) / 16, frac(nz)) / 255;
-	float2 fenc = mrt0.xy * 4 - 2;
+	float nz = floor(rt0.z * 255) / 16;
+	rt0.xy += float2(floor(nz) / 16, frac(nz)) / 255;
+	float2 fenc = rt0.xy * 4 - 2;
 	float f = dot(fenc, fenc);
 	float g = sqrt(1 - f / 4);
 	float3 normal;
@@ -37,19 +32,29 @@ float3 GetNormal(float4 mrt0)
 	return normal;
 }
 
-float GetShininess(float4 mrt0)
+float GetGlossiness(float4 rt0)
 {
-	return pow(8192.0f, mrt0.w);
+	return rt0.w;
 }
 
-float3 GetDiffuse(float4 mrt1)
+float3 GetDiffuse(float4 rt1)
 {
-	return mrt1.xyz;
+	return DiffuseColor(rt1.xyz, rt1.w);
 }
 
-float GetSpecular(float4 mrt1)
+float3 GetSpecular(float4 rt1)
 {
-	return mrt1.w;
+	return SpecularColor(rt1.xyz, rt1.w);
+}
+
+float2 GetMotionVec(float4 rt2)
+{
+	return rt2.xy * 2 - 1;
+}
+
+float GetOcclusion(float4 rt2)
+{
+	return rt2.z;
 }
 
 

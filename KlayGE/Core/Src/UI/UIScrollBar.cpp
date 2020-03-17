@@ -11,6 +11,7 @@
 /////////////////////////////////////////////////////////////////////////////////
 
 #include <KlayGE/KlayGE.hpp>
+#include <KFL/ErrorHandling.hpp>
 #include <KFL/Util.hpp>
 #include <KFL/Math.hpp>
 
@@ -19,48 +20,18 @@
 namespace KlayGE
 {
 	// Minimum scroll bar thumb size
-	int const SCROLLBAR_MINTHUMBSIZE = 8;
+	int constexpr SCROLLBAR_MINTHUMBSIZE = 8;
 
 	// Delay and repeat period when clicking on the scroll bar arrows
-	float const SCROLLBAR_ARROWCLICK_DELAY = 0.33f;
-	float const SCROLLBAR_ARROWCLICK_REPEAT = 0.05f;
+	float constexpr SCROLLBAR_ARROWCLICK_DELAY = 0.33f;
+	float constexpr SCROLLBAR_ARROWCLICK_REPEAT = 0.05f;
 
 	Timer UIScrollBar::timer_;
 
 
 	UIScrollBar::UIScrollBar(UIDialogPtr const & dialog)
-					: UIControl(UIScrollBar::Type, dialog),
-						show_thumb_(true), drag_(false),
-						position_(0), page_size_(1),
-						start_(0), end_(1),
-						arrow_(CLEAR), arrow_ts_(0)
+					: UIScrollBar(UIScrollBar::Type, dialog)
 	{
-		up_button_rc_ = IRect(0, 0, 0, 0);
-		down_button_rc_ = IRect(0, 0, 0, 0);
-		track_rc_ = IRect(0, 0, 0, 0);
-		thumb_rc_ = IRect(0, 0, 0, 0);
-
-		this->InitDefaultElements();
-	}
-
-	UIScrollBar::UIScrollBar(UIDialogPtr const & dialog, int ID, int4 const & coord_size, int nTrackStart, int nTrackEnd, int nTrackPos, int nPageSize)
-					: UIControl(UIScrollBar::Type, dialog),
-						show_thumb_(true), drag_(false),
-						position_(nTrackPos), page_size_(nPageSize),
-						start_(nTrackStart), end_(nTrackEnd),
-						arrow_(CLEAR), arrow_ts_(0)
-	{
-		up_button_rc_ = IRect(0, 0, 0, 0);
-		down_button_rc_ = IRect(0, 0, 0, 0);
-		track_rc_ = IRect(0, 0, 0, 0);
-		thumb_rc_ = IRect(0, 0, 0, 0);
-
-		this->InitDefaultElements();
-
-		// Set the ID and position
-		this->SetID(ID);
-		this->SetLocation(coord_size.x(), coord_size.y());
-		this->SetSize(coord_size.z(), coord_size.w());
 	}
 
 	UIScrollBar::UIScrollBar(uint32_t type, UIDialogPtr const & dialog)
@@ -75,11 +46,6 @@ namespace KlayGE
 		track_rc_ = IRect(0, 0, 0, 0);
 		thumb_rc_ = IRect(0, 0, 0, 0);
 
-		this->InitDefaultElements();
-	}
-
-	void UIScrollBar::InitDefaultElements()
-	{
 		UIElement Element;
 
 		// Track
@@ -87,7 +53,7 @@ namespace KlayGE
 			Element.SetTexture(0, UIManager::Instance().ElementTextureRect(UICT_ScrollBar, 0));
 			Element.TextureColor().States[UICS_Disabled] = Color(200.0f / 255, 200.0f / 255, 200.0f / 255, 1);
 
-			elements_.push_back(MakeSharedPtr<UIElement>(Element));
+			elements_.push_back(MakeUniquePtr<UIElement>(Element));
 		}
 
 		// Up Arrow
@@ -95,7 +61,7 @@ namespace KlayGE
 			Element.SetTexture(0, UIManager::Instance().ElementTextureRect(UICT_ScrollBar, 1));
 			Element.TextureColor().States[UICS_Disabled] = Color(200.0f / 255, 200.0f / 255, 200.0f / 255, 1);
 
-			elements_.push_back(MakeSharedPtr<UIElement>(Element));
+			elements_.push_back(MakeUniquePtr<UIElement>(Element));
 		}
 
 		// Down Arrow
@@ -103,15 +69,29 @@ namespace KlayGE
 			Element.SetTexture(0, UIManager::Instance().ElementTextureRect(UICT_ScrollBar, 2));
 			Element.TextureColor().States[UICS_Disabled] = Color(200.0f / 255, 200.0f / 255, 200.0f / 255, 1);
 
-			elements_.push_back(MakeSharedPtr<UIElement>(Element));
+			elements_.push_back(MakeUniquePtr<UIElement>(Element));
 		}
 
 		// Button
 		{
 			Element.SetTexture(0, UIManager::Instance().ElementTextureRect(UICT_ScrollBar, 3));
 
-			elements_.push_back(MakeSharedPtr<UIElement>(Element));
+			elements_.push_back(MakeUniquePtr<UIElement>(Element));
 		}
+	}
+
+	UIScrollBar::UIScrollBar(UIDialogPtr const & dialog, int ID, int4 const & coord_size, int nTrackStart, int nTrackEnd, int nTrackPos, int nPageSize)
+					: UIScrollBar(UIScrollBar::Type, dialog)
+	{
+		position_ = nTrackPos;
+		page_size_ = nPageSize;
+		start_ = nTrackStart;
+		end_ = nTrackEnd;
+
+		// Set the ID and position
+		this->SetID(ID);
+		this->SetLocation(coord_size.x(), coord_size.y());
+		this->SetSize(coord_size.z(), coord_size.w());
 	}
 
 	UIScrollBar::~UIScrollBar()
@@ -335,8 +315,7 @@ namespace KlayGE
 					break;
 
 				default:
-					BOOST_ASSERT(false);
-					break;
+					KFL_UNREACHABLE("Invalid arrow state");
 				}
 			}
 			else
@@ -363,8 +342,7 @@ namespace KlayGE
 						break;
 
 					default:
-						BOOST_ASSERT(false);
-						break;
+						KFL_UNREACHABLE("Invalid arrow state");
 					}
 				}
 			}
@@ -396,33 +374,25 @@ namespace KlayGE
 		}
 
 
-		// Background track layer
-		UIElementPtr pElement = elements_[0];
+		auto& track_element = *elements_[0];
 
-		// Blend current color
-		pElement->TextureColor().SetState(iState);
-		this->GetDialog()->DrawSprite(*pElement, track_rc_);
+		track_element.TextureColor().SetState(iState);
+		this->GetDialog()->DrawSprite(track_element, track_rc_);
 
-		// Up Arrow
-		pElement = elements_[1];
+		auto& up_arrow_element = *elements_[1];
 
-		// Blend current color
-		pElement->TextureColor().SetState(iState);
-		this->GetDialog()->DrawSprite(*pElement, up_button_rc_);
+		up_arrow_element.TextureColor().SetState(iState);
+		this->GetDialog()->DrawSprite(up_arrow_element, up_button_rc_);
 
-		// Down Arrow
-		pElement = elements_[2];
+		auto& down_arrow_element = *elements_[2];
 
-		// Blend current color
-		pElement->TextureColor().SetState(iState);
-		this->GetDialog()->DrawSprite(*pElement, down_button_rc_);
+		down_arrow_element.TextureColor().SetState(iState);
+		this->GetDialog()->DrawSprite(down_arrow_element, down_button_rc_);
 
-		// Thumb button
-		pElement = elements_[3];
+		auto& thumb_element = *elements_[3];
 
-		// Blend current color
-		pElement->TextureColor().SetState(iState);
-		this->GetDialog()->DrawSprite(*pElement, thumb_rc_);
+		thumb_element.TextureColor().SetState(iState);
+		this->GetDialog()->DrawSprite(thumb_element, thumb_rc_);
 	}
 
 	void UIScrollBar::SetTrackRange(size_t nStart, size_t nEnd)

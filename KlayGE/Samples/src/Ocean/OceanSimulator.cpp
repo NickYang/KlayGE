@@ -61,10 +61,10 @@ namespace KlayGE
 	{
 		RenderFactory& rf = Context::Instance().RenderFactoryInstance();
 
-		RenderEffectPtr effect = SyncLoadRenderEffect("OceanSimulator.fxml");
-		update_spectrum_tech_ = effect->TechniqueByName("UpdateSpectrum");
-		update_displacement_tech_ = effect->TechniqueByName("UpdateDisplacement");
-		gen_gradient_folding_tech_ = effect->TechniqueByName("GenGradientFolding");
+		effect_ = SyncLoadRenderEffect("OceanSimulator.fxml");
+		update_spectrum_tech_ = effect_->TechniqueByName("UpdateSpectrum");
+		update_displacement_tech_ = effect_->TechniqueByName("UpdateDisplacement");
+		gen_gradient_folding_tech_ = effect_->TechniqueByName("GenGradientFolding");
 
 		quad_layout_ = rf.MakeRenderLayout();
 		quad_layout_->TopologyType(RenderLayout::TT_TriangleStrip);
@@ -77,9 +77,9 @@ namespace KlayGE
 			float2(+1, -1)
 		};
 		GraphicsBufferPtr quad_vb = rf.MakeVertexBuffer(BU_Static, EAH_GPU_Read | EAH_Immutable, sizeof(xys), xys);
-		quad_layout_->BindVertexStream(quad_vb, std::make_tuple(vertex_element(VEU_Position, 0, EF_GR32F)));
+		quad_layout_->BindVertexStream(quad_vb, VertexElement(VEU_Position, 0, EF_GR32F));
 
-		time_param_ = effect->ParameterByName("time");
+		time_param_ = effect_->ParameterByName("time");
 
 		tex_fb_ = rf.MakeFrameBuffer();
 	}
@@ -126,15 +126,15 @@ namespace KlayGE
 		*time_param_ = frame * param_.time_peroid / param_.num_frames;
 
 		re.BindFrameBuffer(tex_fb_);
-		re.Render(*update_spectrum_tech_, *quad_layout_);
+		re.Render(*effect_, *update_spectrum_tech_, *quad_layout_);
 
-		fft_->Execute(out_real_tex_, out_imag_tex_, out_real_tex_, out_imag_tex_);
+		fft_->Execute(out_real_tex_, out_imag_tex_, out_real_srv_, out_imag_srv_);
 
 		re.BindFrameBuffer(displacement_fb_);
-		re.Render(*update_displacement_tech_, *quad_layout_);
+		re.Render(*effect_, *update_displacement_tech_, *quad_layout_);
 
 		re.BindFrameBuffer(gradient_fb_);
-		re.Render(*gen_gradient_folding_tech_, *quad_layout_);
+		re.Render(*effect_, *gen_gradient_folding_tech_, *quad_layout_);
 
 		re.BindFrameBuffer(old_fb);
 	}
@@ -170,41 +170,44 @@ namespace KlayGE
 		init_data.data = &h0_data[0];
 		init_data.row_pitch = (params.dmap_dim + 1) * sizeof(float2);
 		init_data.slice_pitch = init_data.row_pitch * (params.dmap_dim + 1);
-		h0_tex_ = rf.MakeTexture2D(params.dmap_dim + 1, params.dmap_dim + 1, 1, 1, EF_GR32F, 1, 0, EAH_GPU_Read | EAH_Immutable, &init_data);
+		h0_tex_ = rf.MakeTexture2D(
+			params.dmap_dim + 1, params.dmap_dim + 1, 1, 1, EF_GR32F, 1, 0, EAH_GPU_Read | EAH_Immutable, MakeSpan<1>(init_data));
 
 		init_data.data = &omega_data[0];
 		init_data.row_pitch = (params.dmap_dim + 1) * sizeof(float);
 		init_data.slice_pitch = init_data.row_pitch * (params.dmap_dim + 1);
-		omega_tex_ = rf.MakeTexture2D(params.dmap_dim + 1, params.dmap_dim + 1, 1, 1, EF_R32F, 1, 0, EAH_GPU_Read | EAH_Immutable, &init_data);
+		omega_tex_ = rf.MakeTexture2D(
+			params.dmap_dim + 1, params.dmap_dim + 1, 1, 1, EF_R32F, 1, 0, EAH_GPU_Read | EAH_Immutable, MakeSpan<1>(init_data));
 
-		displacement_tex_ = rf.MakeTexture2D(params.dmap_dim, params.dmap_dim, 1, 1, EF_ABGR16F, 1, 0, EAH_GPU_Read | EAH_GPU_Write, nullptr);
-		gradient_tex_ = rf.MakeTexture2D(params.dmap_dim, params.dmap_dim, 1, 1, EF_ABGR8, 1, 0, EAH_GPU_Read | EAH_GPU_Write, nullptr);
+		displacement_tex_ = rf.MakeTexture2D(params.dmap_dim, params.dmap_dim, 1, 1, EF_ABGR16F, 1, 0, EAH_GPU_Read | EAH_GPU_Write);
+		gradient_tex_ = rf.MakeTexture2D(params.dmap_dim, params.dmap_dim, 1, 1, EF_ABGR8, 1, 0, EAH_GPU_Read | EAH_GPU_Write);
 
 		displacement_fb_ = rf.MakeFrameBuffer();
-		displacement_fb_->Attach(FrameBuffer::ATT_Color0, rf.Make2DRenderView(*displacement_tex_, 0, 1, 0));
+		displacement_fb_->Attach(FrameBuffer::Attachment::Color0, rf.Make2DRtv(displacement_tex_, 0, 1, 0));
 		gradient_fb_ = rf.MakeFrameBuffer();
-		gradient_fb_->Attach(FrameBuffer::ATT_Color0, rf.Make2DRenderView(*gradient_tex_, 0, 1, 0));
+		gradient_fb_->Attach(FrameBuffer::Attachment::Color0, rf.Make2DRtv(gradient_tex_, 0, 1, 0));
 
-		out_real_tex_ = rf.MakeTexture2D(param_.dmap_dim, param_.dmap_dim, 1, 1, EF_ABGR16F, 1, 0, EAH_GPU_Read | EAH_GPU_Write, nullptr);
-		out_imag_tex_ = rf.MakeTexture2D(param_.dmap_dim, param_.dmap_dim, 1, 1, EF_ABGR16F, 1, 0, EAH_GPU_Read | EAH_GPU_Write, nullptr);
-		tex_fb_->Attach(FrameBuffer::ATT_Color0, rf.Make2DRenderView(*out_real_tex_, 0, 1, 0));
-		tex_fb_->Attach(FrameBuffer::ATT_Color1, rf.Make2DRenderView(*out_imag_tex_, 0, 1, 0));
+		out_real_tex_ = rf.MakeTexture2D(param_.dmap_dim, param_.dmap_dim, 1, 1, EF_ABGR16F, 1, 0, EAH_GPU_Read | EAH_GPU_Write);
+		out_real_srv_ = rf.MakeTextureSrv(out_real_tex_);
+		out_imag_tex_ = rf.MakeTexture2D(param_.dmap_dim, param_.dmap_dim, 1, 1, EF_ABGR16F, 1, 0, EAH_GPU_Read | EAH_GPU_Write);
+		out_imag_srv_ = rf.MakeTextureSrv(out_imag_tex_);
+		tex_fb_->Attach(FrameBuffer::Attachment::Color0, rf.Make2DRtv(out_real_tex_, 0, 1, 0));
+		tex_fb_->Attach(FrameBuffer::Attachment::Color1, rf.Make2DRtv(out_imag_tex_, 0, 1, 0));
 
 		uint32_t actual_dim = param_.dmap_dim;
 		uint32_t input_dim = actual_dim + 1;
 		uint32_t output_dim = actual_dim;
 		uint32_t dtx_offset = actual_dim * actual_dim;
 
-		RenderEffect& effect = update_spectrum_tech_->Effect();
-		*(effect.ParameterByName("actual_dim")) = float4(static_cast<float>(actual_dim), actual_dim * 0.5f,
+		*(effect_->ParameterByName("actual_dim")) = float4(static_cast<float>(actual_dim), actual_dim * 0.5f,
 			1.0f / actual_dim, static_cast<float>(dtx_offset));
-		*(effect.ParameterByName("inout_scale")) = static_cast<float>(output_dim) / input_dim;
-		*(effect.ParameterByName("h0_tex")) = h0_tex_;
-		*(effect.ParameterByName("omega_tex")) = omega_tex_;
-		*(effect.ParameterByName("choppy_scale")) = param_.choppy_scale;
-		*(effect.ParameterByName("grid_len")) = param_.dmap_dim / param_.patch_length;
-		*(effect.ParameterByName("displacement_tex")) = displacement_tex_;
-		*(effect.ParameterByName("dxyz_tex")) = out_real_tex_;
+		*(effect_->ParameterByName("inout_scale")) = static_cast<float>(output_dim) / input_dim;
+		*(effect_->ParameterByName("h0_tex")) = h0_tex_;
+		*(effect_->ParameterByName("omega_tex")) = omega_tex_;
+		*(effect_->ParameterByName("choppy_scale")) = param_.choppy_scale;
+		*(effect_->ParameterByName("grid_len")) = param_.dmap_dim / param_.patch_length;
+		*(effect_->ParameterByName("displacement_tex")) = displacement_tex_;
+		*(effect_->ParameterByName("dxyz_tex")) = out_real_tex_;
 
 		fft_ = MakeSharedPtr<GpuFftPS>(params.dmap_dim, params.dmap_dim, false);
 	}

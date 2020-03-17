@@ -1,76 +1,74 @@
 #include <KlayGE/KlayGE.hpp>
+#include <KFL/ErrorHandling.hpp>
 #include <KlayGE/TexCompressionBC.hpp>
 #include <KlayGE/TexCompressionETC.hpp>
 #include <KlayGE/Texture.hpp>
 #include <KlayGE/ResLoader.hpp>
 #include <KFL/Half.hpp>
 
-#include <boost/assert.hpp>
-#include <boost/test/unit_test.hpp>
-
 #include <vector>
 #include <string>
 #include <iostream>
 
+#include "KlayGETests.hpp"
+
 using namespace std;
 using namespace KlayGE;
 
-void TestEncodeDecodeTex(std::string const & input_name, std::string const & tc_name,
+void TestEncodeDecodeTex(std::string_view input_name, std::string_view tc_name,
 		ElementFormat bc_fmt, float threshold)
 {
+	ResLoader::Instance().AddPath("../../Tests/media/EncodeDecodeTex");
+
 	std::vector<uint8_t> input_argb;
 	std::vector<uint8_t> bc_blocks;
 	uint32_t width, height;
 
-	TexCompressionPtr codec;
+	std::unique_ptr<TexCompression> codec;
 	switch (bc_fmt)
 	{
 	case EF_BC1:
-		codec = MakeSharedPtr<TexCompressionBC1>();
+		codec = MakeUniquePtr<TexCompressionBC1>();
 		break;
 
 	case EF_BC2:
-		codec = MakeSharedPtr<TexCompressionBC2>();
+		codec = MakeUniquePtr<TexCompressionBC2>();
 		break;
 
 	case EF_BC3:
-		codec = MakeSharedPtr<TexCompressionBC3>();
+		codec = MakeUniquePtr<TexCompressionBC3>();
 		break;
 
 	case EF_BC6:
-		codec = MakeSharedPtr<TexCompressionBC6U>();
+		codec = MakeUniquePtr<TexCompressionBC6U>();
 		break;
 
 	case EF_SIGNED_BC6:
-		codec = MakeSharedPtr<TexCompressionBC6S>();
+		codec = MakeUniquePtr<TexCompressionBC6S>();
 		break;
 
 	case EF_BC7:
-		codec = MakeSharedPtr<TexCompressionBC7>();
+		codec = MakeUniquePtr<TexCompressionBC7>();
 		break;
 
 	case EF_ETC1:
-		codec = MakeSharedPtr<TexCompressionETC1>();
+		codec = MakeUniquePtr<TexCompressionETC1>();
 		break;
 
 	default:
-		BOOST_ASSERT(false);
-		break;
+		KFL_UNREACHABLE("Unsupported compression format");
 	}
 
-	ElementFormat const decoded_fmt = codec->DecodedFormat();
+	ElementFormat const decoded_fmt = DecodedFormat(bc_fmt);
 	uint32_t const pixel_size = NumFormatBytes(decoded_fmt);
 
 	{
-		Texture::TextureType type;
-		uint32_t depth, num_mipmaps, array_size;
-		ElementFormat format;
-		std::vector<ElementInitData> init_data;
-		std::vector<uint8_t> data_block;
-		LoadTexture(input_name, type, width, height, depth, num_mipmaps, array_size,
-			format, init_data, data_block);
+		TexturePtr in_tex = LoadSoftwareTexture(input_name);
+		width = in_tex->Width(0);
+		height = in_tex->Height(0);
+		auto const & init_data = checked_cast<SoftwareTexture&>(*in_tex).SubresourceData();
 
-		BOOST_ASSERT(pixel_size == NumFormatBytes(format));
+		BOOST_ASSERT(pixel_size == NumFormatBytes(in_tex->Format()));
 
 		input_argb.resize(width * height * pixel_size);
 		array<uint8_t, 16> pixel;
@@ -104,9 +102,9 @@ void TestEncodeDecodeTex(std::string const & input_name, std::string const & tc_
 		}
 	}
 
-	uint32_t const block_width = codec->BlockWidth();
-	uint32_t const block_height = codec->BlockWidth();
-	uint32_t const block_bytes = codec->BlockBytes();
+	uint32_t const block_width = BlockWidth(bc_fmt);
+	uint32_t const block_height = BlockWidth(bc_fmt);
+	uint32_t const block_bytes = BlockBytes(bc_fmt);
 	bc_blocks.resize((width + block_width - 1) / block_width * (height + block_height - 1) / block_height * block_bytes);
 
 	if (tc_name.empty())
@@ -139,13 +137,10 @@ void TestEncodeDecodeTex(std::string const & input_name, std::string const & tc_
 	}
 	else
 	{
-		Texture::TextureType type;
-		uint32_t depth, num_mipmaps, array_size;
-		ElementFormat format;
-		std::vector<ElementInitData> init_data;
-		std::vector<uint8_t> data_block;
-		LoadTexture(tc_name, type, width, height, depth, num_mipmaps, array_size,
-			format, init_data, data_block);
+		TexturePtr in_tex = LoadSoftwareTexture(tc_name);
+		width = in_tex->Width(0);
+		height = in_tex->Height(0);
+		auto const & init_data = checked_cast<SoftwareTexture&>(*in_tex).SubresourceData();
 
 		uint8_t const * src = static_cast<uint8_t const *>(init_data[0].data);
 		uint32_t const pitch = init_data[0].row_pitch;
@@ -231,86 +226,70 @@ void TestEncodeDecodeTex(std::string const & input_name, std::string const & tc_
 	}
 
 	mse = sqrt(mse / (width * height) / 4);
-	BOOST_CHECK(mse < threshold);
+	EXPECT_LT(mse, threshold);
 }
 
-class EncodeDecodeTexFixture
-{
-public:
-	EncodeDecodeTexFixture()
-	{
-		ResLoader::Instance().AddPath("../../Tests/media");
-	}
-
-	~EncodeDecodeTexFixture()
-	{
-		Context::Destroy();
-	}
-};
-
-BOOST_GLOBAL_FIXTURE(EncodeDecodeTexFixture);
-
-BOOST_AUTO_TEST_CASE(DecodeBC1)
+TEST(EncodeDecodeTexTest, DecodeBC1)
 {
 	TestEncodeDecodeTex("Lenna.dds", "Lenna_bc1.dds", EF_BC1, 4.7f);
 }
 
-BOOST_AUTO_TEST_CASE(DecodeBC2)
+TEST(EncodeDecodeTexTest, DecodeBC2)
 {
-	TestEncodeDecodeTex("leaf_v3_green_tex.dds", "leaf_v3_green_tex_bc2.dds", EF_BC2, 9.2f);
+	TestEncodeDecodeTex("leaf_v3_green_tex.dds", "leaf_v3_green_tex_bc2.dds", EF_BC2, 9.0f);
 }
 
-BOOST_AUTO_TEST_CASE(DecodeBC3)
+TEST(EncodeDecodeTexTest, DecodeBC3)
 {
-	TestEncodeDecodeTex("leaf_v3_green_tex.dds", "leaf_v3_green_tex_bc3.dds", EF_BC3, 8.9f);
+	TestEncodeDecodeTex("leaf_v3_green_tex.dds", "leaf_v3_green_tex_bc3.dds", EF_BC3, 8.8f);
 }
 
-BOOST_AUTO_TEST_CASE(DecodeBC6U)
+TEST(EncodeDecodeTexTest, DecodeBC6U)
 {
 	TestEncodeDecodeTex("memorial.dds", "memorial_bc6u.dds", EF_BC6, 0.1f);
 }
 
-BOOST_AUTO_TEST_CASE(DecodeBC6S)
+TEST(EncodeDecodeTexTest, DecodeBC6S)
 {
 	TestEncodeDecodeTex("uffizi_probe.dds", "uffizi_probe_bc6s.dds", EF_SIGNED_BC6, 0.1f);
 }
 
-BOOST_AUTO_TEST_CASE(DecodeBC7XRGB)
+TEST(EncodeDecodeTexTest, DecodeBC7XRGB)
 {
 	TestEncodeDecodeTex("Lenna.dds", "Lenna_bc7.dds", EF_BC7, 2.1f);
 }
 
-BOOST_AUTO_TEST_CASE(DecodeBC7ARGB)
+TEST(EncodeDecodeTexTest, DecodeBC7ARGB)
 {
-	TestEncodeDecodeTex("leaf_v3_green_tex.dds", "leaf_v3_green_tex_bc7.dds", EF_BC7, 4.6f);
+	TestEncodeDecodeTex("leaf_v3_green_tex.dds", "leaf_v3_green_tex_bc7.dds", EF_BC7, 8.6f);
 }
 
-BOOST_AUTO_TEST_CASE(EncodeDecodeBC1)
+TEST(EncodeDecodeTexTest, EncodeDecodeBC1)
 {
 	TestEncodeDecodeTex("Lenna.dds", "", EF_BC1, 4.6f);
 }
 
-BOOST_AUTO_TEST_CASE(EncodeDecodeBC2)
+TEST(EncodeDecodeTexTest, EncodeDecodeBC2)
 {
 	TestEncodeDecodeTex("leaf_v3_green_tex.dds", "", EF_BC2, 9.1f);
 }
 
-BOOST_AUTO_TEST_CASE(EncodeDecodeBC3)
+TEST(EncodeDecodeTexTest, EncodeDecodeBC3)
 {
 	TestEncodeDecodeTex("leaf_v3_green_tex.dds", "", EF_BC3, 8.9f);
 }
 
-BOOST_AUTO_TEST_CASE(EncodeDecodeBC7XRGB)
+TEST(EncodeDecodeTexTest, EncodeDecodeBC7XRGB)
 {
 	TestEncodeDecodeTex("Lenna.dds", "", EF_BC7, 1.8f);
 }
 
-BOOST_AUTO_TEST_CASE(EncodeDecodeBC7ARGB)
+TEST(EncodeDecodeTexTest, EncodeDecodeBC7ARGB)
 {
-	TestEncodeDecodeTex("leaf_v3_green_tex.dds", "", EF_BC7, 10.1f);
+	TestEncodeDecodeTex("leaf_v3_green_tex.dds", "", EF_BC7, 11.0f);
 }
 
-BOOST_AUTO_TEST_CASE(EncodeDecodeETC1)
+TEST(EncodeDecodeTexTest, EncodeDecodeETC1)
 {
 	TestEncodeDecodeTex("Lenna.dds", "", EF_ETC1, 4.8f);
 }

@@ -35,11 +35,11 @@
 
 #include <KlayGE/PreDeclare.hpp>
 #include <KFL/Math.hpp>
-#include <KFL/Thread.hpp>
-#include <KlayGE/SceneObjectHelper.hpp>
+#include <KlayGE/SceneNode.hpp>
 
-#include <vector>
+#include <mutex>
 #include <random>
+#include <vector>
 
 namespace KlayGE
 {
@@ -58,7 +58,7 @@ namespace KlayGE
 	class KLAYGE_CORE_API ParticleEmitter
 	{
 	public:
-		explicit ParticleEmitter(SceneObjectPtr const & ps);
+		explicit ParticleEmitter(ParticleSystemPtr const& ps);
 		virtual ~ParticleEmitter()
 		{
 		}
@@ -207,7 +207,7 @@ namespace KlayGE
 	class KLAYGE_CORE_API ParticleUpdater
 	{
 	public:
-		explicit ParticleUpdater(SceneObjectPtr const & ps);
+		explicit ParticleUpdater(ParticleSystemPtr const& ps);
 		virtual ~ParticleUpdater()
 		{
 		}
@@ -216,6 +216,7 @@ namespace KlayGE
 		virtual ParticleUpdaterPtr Clone() = 0;
 
 		virtual void Update(Particle& par, float elapse_time) = 0;
+		virtual void SnapParams() = 0;
 
 	protected:
 		void DoClone(ParticleUpdaterPtr const & rhs);
@@ -224,12 +225,17 @@ namespace KlayGE
 		std::weak_ptr<ParticleSystem> ps_;
 	};
 
-	class KLAYGE_CORE_API ParticleSystem : public SceneObjectHelper
+	class KLAYGE_CORE_API ParticleSystem : public std::enable_shared_from_this<ParticleSystem>
 	{
 	public:
-		explicit ParticleSystem(uint32_t max_num_particles);
+		explicit ParticleSystem(uint32_t max_num_particles, bool sort_particles = false);
 
-		virtual ParticleSystemPtr Clone();
+		ParticleSystemPtr Clone();
+
+		SceneNodePtr const& RootNode() const
+		{
+			return root_node_;
+		}
 
 		void Gravity(float gravity)
 		{
@@ -256,8 +262,8 @@ namespace KlayGE
 			return media_density_;
 		}
 
-		ParticleEmitterPtr MakeEmitter(std::string const & type);
-		ParticleUpdaterPtr MakeUpdater(std::string const & type);
+		ParticleEmitterPtr MakeEmitter(std::string_view type);
+		ParticleUpdaterPtr MakeUpdater(std::string_view type);
 
 		void AddEmitter(ParticleEmitterPtr const & emitter);
 		void DelEmitter(ParticleEmitterPtr const & emitter);
@@ -285,21 +291,12 @@ namespace KlayGE
 			return updaters_[index];
 		}
 
-		virtual void SubThreadUpdate(float app_time, float elapsed_time) KLAYGE_OVERRIDE;
-		virtual bool MainThreadUpdate(float app_time, float elapsed_time) KLAYGE_OVERRIDE;
-
 		uint32_t NumParticles() const
 		{
 			return static_cast<uint32_t>(particles_.size());
 		}
-		uint32_t NumActiveParticles() const
-		{
-			return static_cast<uint32_t>(active_particles_.size());
-		}
-		uint32_t GetActiveParticleIndex(uint32_t i) const
-		{
-			return active_particles_[i].first;
-		}
+		uint32_t NumActiveParticles() const;
+		uint32_t GetActiveParticleIndex(uint32_t i) const;
 		Particle const & GetParticle(uint32_t i) const
 		{
 			BOOST_ASSERT(i < particles_.size());
@@ -335,12 +332,20 @@ namespace KlayGE
 
 		void SceneDepthTexture(TexturePtr const & depth_tex);
 
-	protected:
+	private:
+		void UpdateParticlesNoLock(float elapsed_time);
+		void UpdateParticleBufferNoLock();
+
+	private:
+		SceneNodePtr root_node_;
+		RenderablePtr render_particles_;
+
 		std::vector<ParticleEmitterPtr> emitters_;
 		std::vector<ParticleUpdaterPtr> updaters_;
 
 		std::vector<Particle> particles_;
-		std::vector<std::pair<uint32_t, float>> active_particles_;
+		std::vector<std::pair<uint32_t, float>> actived_particles_;
+		mutable std::mutex actived_particles_mutex_;
 
 		float gravity_;
 		float3 force_;
@@ -351,13 +356,13 @@ namespace KlayGE
 		Color particle_color_from_;
 		Color particle_color_to_;
 
-		bool gs_support_;
+		bool sort_particles_;
 
-		std::mutex update_mutex_;
+		bool gs_support_;
 	};
 
-	KLAYGE_CORE_API ParticleSystemPtr SyncLoadParticleSystem(std::string const & psml_name);
-	KLAYGE_CORE_API ParticleSystemPtr ASyncLoadParticleSystem(std::string const & psml_name);
+	KLAYGE_CORE_API ParticleSystemPtr SyncLoadParticleSystem(std::string_view psml_name);
+	KLAYGE_CORE_API ParticleSystemPtr ASyncLoadParticleSystem(std::string_view psml_name);
 
 	KLAYGE_CORE_API void SaveParticleSystem(ParticleSystemPtr const & ps, std::string const & psml_name);
 
@@ -365,12 +370,12 @@ namespace KlayGE
 	class KLAYGE_CORE_API PointParticleEmitter : public ParticleEmitter
 	{
 	public:
-		explicit PointParticleEmitter(SceneObjectPtr const & ps);
+		explicit PointParticleEmitter(ParticleSystemPtr const& ps);
 
-		virtual std::string const & Type() const KLAYGE_OVERRIDE;
-		virtual ParticleEmitterPtr Clone() KLAYGE_OVERRIDE;
+		virtual std::string const & Type() const override;
+		virtual ParticleEmitterPtr Clone() override;
 
-		virtual void Emit(Particle& par) KLAYGE_OVERRIDE;
+		virtual void Emit(Particle& par) override;
 
 	private:
 		float RandomGen();
@@ -383,10 +388,10 @@ namespace KlayGE
 	class KLAYGE_CORE_API PolylineParticleUpdater : public ParticleUpdater
 	{
 	public:
-		explicit PolylineParticleUpdater(SceneObjectPtr const & ps);
+		explicit PolylineParticleUpdater(ParticleSystemPtr const& ps);
 
-		virtual std::string const & Type() const KLAYGE_OVERRIDE;
-		virtual ParticleUpdaterPtr Clone() KLAYGE_OVERRIDE;
+		virtual std::string const & Type() const override;
+		virtual ParticleUpdaterPtr Clone() override;
 
 		void SizeOverLife(std::vector<float2> const & size_over_life)
 		{
@@ -416,13 +421,19 @@ namespace KlayGE
 			return opacity_over_life_;
 		}
 
-		virtual void Update(Particle& par, float elapse_time) KLAYGE_OVERRIDE;
+		void Update(Particle& par, float elapse_time) override;
+		void SnapParams() override;
 
 	private:
 		std::mutex update_mutex_;
+
 		std::vector<float2> size_over_life_;
 		std::vector<float2> mass_over_life_;
 		std::vector<float2> opacity_over_life_;
+
+		std::vector<float2> this_frame_size_over_life_;
+		std::vector<float2> this_frame_mass_over_life_;
+		std::vector<float2> this_frame_opacity_over_life_;
 	};
 }
 

@@ -24,7 +24,7 @@ namespace KlayGE
 	class KLAYGE_CORE_API SATSeparableScanSweepPostProcess : public PostProcess
 	{
 	public:
-		SATSeparableScanSweepPostProcess(RenderTechniquePtr const & tech);
+		SATSeparableScanSweepPostProcess(RenderEffectPtr const & effect, RenderTechnique* tech);
 
 		void ChildBuffer(TexturePtr const & tex);
 		void Length(int32_t length);
@@ -34,10 +34,10 @@ namespace KlayGE
 	private:
 		int32_t length_;
 
-		RenderEffectParameterPtr child_tex_ep_;
-		RenderEffectParameterPtr addr_offset_ep_;
-		RenderEffectParameterPtr length_ep_;
-		RenderEffectParameterPtr scale_ep_;
+		RenderEffectParameter* child_tex_ep_;
+		RenderEffectParameter* addr_offset_ep_;
+		RenderEffectParameter* length_ep_;
+		RenderEffectParameter* scale_ep_;
 	};
 
 	class KLAYGE_CORE_API SATPostProcess : public PostProcessChain
@@ -45,7 +45,7 @@ namespace KlayGE
 	public:
 		SATPostProcess();
 
-		virtual void InputPin(uint32_t index, TexturePtr const & tex);
+		void InputPin(uint32_t index, ShaderResourceViewPtr const& srv) override;
 		using PostProcessChain::InputPin;
 	};
 
@@ -55,7 +55,7 @@ namespace KlayGE
 	public:
 		SATPostProcessCS();
 
-		virtual void InputPin(uint32_t index, TexturePtr const & tex);
+		void InputPin(uint32_t index, ShaderResourceViewPtr const& srv) override;
 		using PostProcessChain::InputPin;
 	};
 }

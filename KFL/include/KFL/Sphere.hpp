@@ -42,62 +42,66 @@
 namespace KlayGE
 {
 	template <typename T>
-	class Sphere_T : boost::addable2<Sphere_T<T>, Vector_T<T, 3>,
-						boost::subtractable2<Sphere_T<T>, Vector_T<T, 3>,
-						boost::multipliable2<Sphere_T<T>, T,
-						boost::dividable2<Sphere_T<T>, T,
-						boost::equality_comparable<Sphere_T<T>>>>>>,
+	class Sphere_T final : boost::addable2<Sphere_T<T>, Vector_T<T, 3>,
+							boost::subtractable2<Sphere_T<T>, Vector_T<T, 3>,
+							boost::multipliable2<Sphere_T<T>, T,
+							boost::dividable2<Sphere_T<T>, T,
+							boost::equality_comparable<Sphere_T<T>>>>>>,
 				public Bound_T<T>
 	{
 	public:
-		Sphere_T() KLAYGE_NOEXCEPT
+		constexpr Sphere_T() noexcept
+			: radius_()
 		{
 		}
-		Sphere_T(Vector_T<T, 3> const & center, T radius) KLAYGE_NOEXCEPT;
-		Sphere_T(Sphere_T const & rhs) KLAYGE_NOEXCEPT;
-		Sphere_T(Sphere_T&& rhs) KLAYGE_NOEXCEPT;
+		constexpr Sphere_T(Vector_T<T, 3> const & center, T radius) noexcept
+			: center_(center), radius_(radius)
+		{
+		}
+		Sphere_T(Sphere_T const & rhs) noexcept;
+		Sphere_T(Sphere_T&& rhs) noexcept;
 
 		// 赋值操作符
-		Sphere_T& operator+=(Vector_T<T, 3> const & rhs) KLAYGE_NOEXCEPT;
-		Sphere_T& operator-=(Vector_T<T, 3> const & rhs) KLAYGE_NOEXCEPT;
-		Sphere_T& operator*=(T rhs) KLAYGE_NOEXCEPT;
-		Sphere_T& operator/=(T rhs) KLAYGE_NOEXCEPT;
+		Sphere_T& operator+=(Vector_T<T, 3> const & rhs) noexcept;
+		Sphere_T& operator-=(Vector_T<T, 3> const & rhs) noexcept;
+		Sphere_T& operator*=(T rhs) noexcept;
+		Sphere_T& operator/=(T rhs) noexcept;
 
-		Sphere_T& operator=(Sphere_T const & rhs) KLAYGE_NOEXCEPT;
-		Sphere_T& operator=(Sphere_T&& rhs) KLAYGE_NOEXCEPT;
+		Sphere_T& operator=(Sphere_T const & rhs) noexcept;
+		Sphere_T& operator=(Sphere_T&& rhs) noexcept;
 
 		// 一元操作符
-		Sphere_T const & operator+() const KLAYGE_NOEXCEPT;
-		Sphere_T const & operator-() const KLAYGE_NOEXCEPT;
+		Sphere_T const & operator+() const noexcept;
+		Sphere_T const & operator-() const noexcept;
 
 		// 属性
-		Vector_T<T, 3>& Center() KLAYGE_NOEXCEPT
+		Vector_T<T, 3>& Center() noexcept
 		{
 			return center_;
 		}
-		Vector_T<T, 3> const & Center() const KLAYGE_NOEXCEPT
+		constexpr Vector_T<T, 3> const & Center() const noexcept
 		{
 			return center_;
 		}
-		T& Radius() KLAYGE_NOEXCEPT
+		T& Radius() noexcept
 		{
 			return radius_;
 		}
-		T Radius() const KLAYGE_NOEXCEPT
+		constexpr T Radius() const noexcept
 		{
 			return radius_;
 		}
 
-		virtual bool IsEmpty() const KLAYGE_NOEXCEPT KLAYGE_OVERRIDE;
-		virtual bool VecInBound(Vector_T<T, 3> const & v) const KLAYGE_NOEXCEPT KLAYGE_OVERRIDE;
-		virtual T MaxRadiusSq() const KLAYGE_NOEXCEPT KLAYGE_OVERRIDE;
+		virtual bool IsEmpty() const noexcept override;
+		virtual bool VecInBound(Vector_T<T, 3> const & v) const noexcept override;
+		virtual T MaxRadiusSq() const noexcept override;
 
-		bool Intersect(AABBox_T<T> const & aabb) const KLAYGE_NOEXCEPT;
-		bool Intersect(OBBox_T<T> const & obb) const KLAYGE_NOEXCEPT;
-		bool Intersect(Sphere_T<T> const & sphere) const KLAYGE_NOEXCEPT;
-		bool Intersect(Frustum_T<T> const & frustum) const KLAYGE_NOEXCEPT;
+		bool Intersect(AABBox_T<T> const & aabb) const noexcept;
+		bool Intersect(OBBox_T<T> const & obb) const noexcept;
+		bool Intersect(Sphere_T<T> const & sphere) const noexcept;
+		bool Intersect(Frustum_T<T> const & frustum) const noexcept;
 
-		bool operator==(Sphere_T<T> const & rhs) const KLAYGE_NOEXCEPT;
+		bool operator==(Sphere_T<T> const & rhs) const noexcept;
 
 	private:
 		Vector_T<T, 3> center_;

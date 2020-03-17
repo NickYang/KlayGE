@@ -5,13 +5,12 @@
 		<params>
 			<param name="scaling_factor"/>
 			<param name="inv_width_height"/>
-			<param name="depth_near_far_invfar"/>
 			<param name="inv_proj"/>
 		</params>
 		<input>
 			<pin name="indirect_lighting_tex"/>
-			<pin name="g_buffer_tex"/>
-			<pin name="g_buffer_1_tex"/>
+			<pin name="g_buffer_rt0_tex"/>
+			<pin name="g_buffer_rt1_tex"/>
 			<pin name="depth_tex"/>
 		</input>
 		<output>
@@ -24,13 +23,12 @@
 		<params>
 			<param name="scaling_factor"/>
 			<param name="inv_width_height"/>
-			<param name="depth_near_far_invfar"/>
 			<param name="inv_proj"/>
 		</params>
 		<input>
 			<pin name="indirect_lighting_tex"/>
-			<pin name="g_buffer_tex"/>
-			<pin name="g_buffer_1_tex"/>
+			<pin name="g_buffer_rt0_tex"/>
+			<pin name="g_buffer_rt1_tex"/>
 			<pin name="depth_tex"/>
 		</input>
 		<output>

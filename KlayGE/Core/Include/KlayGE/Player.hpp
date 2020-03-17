@@ -24,8 +24,6 @@
 #include <KFL/Thread.hpp>
 #include <KlayGE/Socket.hpp>
 
-#ifndef KLAYGE_PLATFORM_WINDOWS_RUNTIME
-
 namespace KlayGE
 {
 	struct LobbyDes
@@ -36,7 +34,7 @@ namespace KlayGE
 		sockaddr_in		addr;
 	};
 
-	class KLAYGE_CORE_API Player
+	class KLAYGE_CORE_API Player : boost::noncopyable
 	{
 	public:
 		Player();
@@ -68,7 +66,5 @@ namespace KlayGE
 		std::list<std::vector<char>> sendQueue_;
 	};
 }
-
-#endif
 
 #endif			// _PLAYER_HPP

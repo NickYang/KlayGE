@@ -10,8 +10,6 @@ class DistanceMapping : public KlayGE::App3DFramework
 public:
 	DistanceMapping();
 
-	bool ConfirmDevice() const;
-
 private:
 	void OnCreate();
 	void OnResize(KlayGE::uint32_t width, KlayGE::uint32_t height);
@@ -21,11 +19,11 @@ private:
 	void InputHandler(KlayGE::InputEngine const & sender, KlayGE::InputAction const & action);
 
 	KlayGE::FontPtr font_;
-	KlayGE::SceneObjectPtr polygon_;
+	KlayGE::SceneNodePtr polygon_;
+	KlayGE::RenderablePtr polygon_renderable_;
 
 	KlayGE::FirstPersonCameraController fpcController_;
 
-	KlayGE::SceneObjectPtr light_proxy_;
 	KlayGE::LightSourcePtr light_;
 };
 

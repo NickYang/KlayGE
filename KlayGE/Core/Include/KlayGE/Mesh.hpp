@@ -28,94 +28,103 @@
 #pragma once
 
 #include <KlayGE/PreDeclare.hpp>
+#include <KFL/CXX17/string_view.hpp>
 #include <KlayGE/Renderable.hpp>
 #include <KlayGE/RenderLayout.hpp>
 #include <KFL/Math.hpp>
-#include <KlayGE/SceneObject.hpp>
+#include <KlayGE/SceneNode.hpp>
 
-#include <vector>
 #include <string>
+#include <tuple>
+#include <vector>
 
 namespace KlayGE
 {
+	template <typename T>
+	inline StaticMeshPtr CreateMeshFactory(std::wstring_view name)
+	{
+		return MakeSharedPtr<T>(name);
+	}
+
+	template <typename T>
+	inline RenderModelPtr CreateModelFactory(std::wstring_view name, uint32_t node_attrib)
+	{
+		return MakeSharedPtr<T>(name, node_attrib);
+	}
+
+	KLAYGE_CORE_API void AddToSceneHelper(SceneNode& node, RenderModel& model);
+	KLAYGE_CORE_API void AddToSceneRootHelper(RenderModel& model);
+
+
 	class KLAYGE_CORE_API StaticMesh : public Renderable
 	{
 	public:
-		StaticMesh(RenderModelPtr const & model, std::wstring const & name);
-		virtual ~StaticMesh();
+		explicit StaticMesh(std::wstring_view name);
 
-		void BuildMeshInfo()
+		void BuildMeshInfo(RenderModel const & model);
+
+		virtual void Technique(RenderEffectPtr const & effect, RenderTechnique* tech)
 		{
-			this->DoBuildMeshInfo();
-
-			hw_res_ready_ = true;
-		}
-
-		void SetRenderTechnique(RenderTechniquePtr const & tech)
-		{
+			effect_ = effect;
 			technique_ = tech;
 		}
 
-		RenderLayoutPtr const & GetRenderLayout() const
-		{
-			return rl_;
-		}
+		void NumLods(uint32_t lods) override;
+		using Renderable::NumLods;
 
-		virtual AABBox const & PosBound() const;
 		virtual void PosBound(AABBox const & aabb);
-		virtual AABBox const & TexcoordBound() const;
+		using Renderable::PosBound;
 		virtual void TexcoordBound(AABBox const & aabb);
+		using Renderable::TexcoordBound;
 
-		virtual std::wstring const & Name() const;
-
-		void NumVertices(uint32_t n)
+		void NumVertices(uint32_t lod, uint32_t n)
 		{
-			rl_->NumVertices(n);
+			rls_[lod]->NumVertices(n);
 		}
-		uint32_t NumVertices() const
+		uint32_t NumVertices(uint32_t lod) const
 		{
-			return rl_->NumVertices();
-		}
-
-		void NumTriangles(uint32_t n)
-		{
-			rl_->NumIndices(n * 3);
-		}
-		uint32_t NumTriangles() const
-		{
-			return rl_->NumIndices() / 3;
+			return rls_[lod]->NumVertices();
 		}
 
-		void AddVertexStream(void const * buf, uint32_t size, vertex_element const & ve, uint32_t access_hint);
-		void AddVertexStream(GraphicsBufferPtr const & buffer, vertex_element const & ve);
-		void AddIndexStream(void const * buf, uint32_t size, ElementFormat format, uint32_t access_hint);
-		void AddIndexStream(GraphicsBufferPtr const & index_stream, ElementFormat format);
-
-		void StartVertexLocation(uint32_t location)
+		void NumIndices(uint32_t lod, uint32_t n)
 		{
-			rl_->StartVertexLocation(location);
+			rls_[lod]->NumIndices(n);
 		}
-		uint32_t StartVertexLocation() const
+		uint32_t NumIndices(uint32_t lod) const
 		{
-			return rl_->StartVertexLocation();
+			return rls_[lod]->NumIndices();
 		}
 
-		void StartIndexLocation(uint32_t location)
+		void AddVertexStream(uint32_t lod, void const * buf, uint32_t size, VertexElement const & ve, uint32_t access_hint);
+		void AddVertexStream(uint32_t lod, GraphicsBufferPtr const & buffer, VertexElement const & ve);
+		void AddIndexStream(uint32_t lod, void const * buf, uint32_t size, ElementFormat format, uint32_t access_hint);
+		void AddIndexStream(uint32_t lod, GraphicsBufferPtr const & index_stream, ElementFormat format);
+
+		void StartVertexLocation(uint32_t lod, uint32_t location)
 		{
-			rl_->StartIndexLocation(location);
+			rls_[lod]->StartVertexLocation(location);
 		}
-		uint32_t StartIndexLocation() const
+		uint32_t StartVertexLocation(uint32_t lod) const
 		{
-			return rl_->StartIndexLocation();
+			return rls_[lod]->StartVertexLocation();
 		}
 
-		void StartInstanceLocation(uint32_t location)
+		void StartIndexLocation(uint32_t lod, uint32_t location)
 		{
-			rl_->StartInstanceLocation(location);
+			rls_[lod]->StartIndexLocation(location);
 		}
-		uint32_t StartInstanceLocation() const
+		uint32_t StartIndexLocation(uint32_t lod) const
 		{
-			return rl_->StartInstanceLocation();
+			return rls_[lod]->StartIndexLocation();
+		}
+
+		void StartInstanceLocation(uint32_t lod, uint32_t location)
+		{
+			rls_[lod]->StartInstanceLocation(location);
+		}
+		uint32_t StartInstanceLocation(uint32_t lod) const
+		{
+			return rls_[lod]->StartInstanceLocation();
 		}
 
 		int32_t MaterialID() const
@@ -127,69 +136,42 @@ namespace KlayGE
 			mtl_id_ = mid;
 		}
 
-		virtual bool HWResourceReady() const KLAYGE_OVERRIDE
+		bool HWResourceReady() const override
 		{
 			return hw_res_ready_;
 		}
 
 	protected:
-		virtual void DoBuildMeshInfo();
+		virtual void DoBuildMeshInfo(RenderModel const & model);
 
 	protected:
-		std::wstring name_;
-
-		RenderLayoutPtr rl_;
-
-		AABBox pos_aabb_;
-		AABBox tc_aabb_;
-
 		int32_t mtl_id_;
-
-		std::weak_ptr<RenderModel> model_;
 
 		bool hw_res_ready_;
 	};
 
-	class KLAYGE_CORE_API RenderModel : public Renderable
+	class KLAYGE_CORE_API RenderModel
 	{
 	public:
-		explicit RenderModel(std::wstring const & name);
-		virtual ~RenderModel()
+		explicit RenderModel(SceneNodePtr const & root_node);
+		RenderModel(std::wstring_view name, uint32_t node_attrib);
+		virtual ~RenderModel();
+
+		SceneNodePtr const & RootNode() const
 		{
+			return root_node_;
 		}
 
-		void BuildModelInfo()
-		{
-			this->DoBuildModelInfo();
-
-			hw_res_ready_ = true;
-		}
+		void BuildModelInfo();
 
 		virtual bool IsSkinned() const
 		{
 			return false;
 		}
 
-		void SetRenderTechnique(RenderTechniquePtr const & tech)
-		{
-			technique_ = tech;
-		}
+		uint32_t NumLods() const;
 
-		RenderLayoutPtr const & GetRenderLayout() const
-		{
-			return rl_;
-		}
-
-		void OnRenderBegin();
-		void OnRenderEnd();
-
-		AABBox const & PosBound() const;
-		AABBox const & TexcoordBound() const;
-
-		std::wstring const & Name() const
-		{
-			return name_;
-		}
+		void ActiveLod(int32_t lod);
 
 		size_t NumMaterials() const
 		{
@@ -208,31 +190,38 @@ namespace KlayGE
 			return materials_[i];
 		}
 
-		void AddToRenderQueue();
+		template <typename ForwardIterator>
+		void AssignMeshes(ForwardIterator first, ForwardIterator last)
+		{
+			meshes_.assign(first, last);
+		}
+		RenderablePtr const & Mesh(size_t id) const
+		{
+			return meshes_[id];
+		}
+		uint32_t NumMeshes() const
+		{
+			return static_cast<uint32_t>(meshes_.size());
+		}
 
-		virtual void Pass(PassType type);
+		void ForEachMesh(std::function<void(Renderable&)> const & callback) const;
 
-		virtual bool SpecialShading() const;
-		virtual bool TransparencyBackFace() const;
-		virtual bool TransparencyFrontFace() const;
-		virtual bool Reflection() const;
-		virtual bool SimpleForward() const;
+		bool HWResourceReady() const;
 
-		virtual bool HWResourceReady() const KLAYGE_OVERRIDE;
+		RenderModelPtr Clone(
+			std::function<RenderModelPtr(std::wstring_view, uint32_t)> const & CreateModelFactoryFunc = CreateModelFactory<RenderModel>,
+			std::function<StaticMeshPtr(std::wstring_view)> const & CreateMeshFactoryFunc = CreateMeshFactory<StaticMesh>);
+		virtual void CloneDataFrom(RenderModel const & source,
+			std::function<StaticMeshPtr(std::wstring_view)> const & CreateMeshFactoryFunc = CreateMeshFactory<StaticMesh>);
 
 	protected:
-		virtual void UpdateBoundBox() KLAYGE_OVERRIDE;
 		virtual void DoBuildModelInfo()
 		{
 		}
 
 	protected:
-		std::wstring name_;
-
-		RenderLayoutPtr rl_;
-
-		AABBox pos_aabb_;
-		AABBox tc_aabb_;
+		SceneNodePtr root_node_;
+		std::vector<RenderablePtr> meshes_;
 
 		std::vector<RenderMaterialPtr> materials_;
 
@@ -255,25 +244,23 @@ namespace KlayGE
 		int16_t parent;
 	};
 
-	struct KLAYGE_CORE_API KeyFrames
+	struct KLAYGE_CORE_API KeyFrameSet
 	{
 		std::vector<uint32_t> frame_id;
 		std::vector<Quaternion> bind_real;
 		std::vector<Quaternion> bind_dual;
 		std::vector<float> bind_scale;
 
-		std::pair<std::pair<Quaternion, Quaternion>, float> Frame(float frame) const;
+		std::tuple<Quaternion, Quaternion, float> Frame(float frame) const;
 	};
-	typedef std::vector<KeyFrames> KeyFramesType;
 
-	struct KLAYGE_CORE_API AABBKeyFrames
+	struct KLAYGE_CORE_API AABBKeyFrameSet
 	{
 		std::vector<uint32_t> frame_id;
 		std::vector<AABBox> bb;
 
 		AABBox Frame(float frame) const;
 	};
-	typedef std::vector<AABBKeyFrames> AABBKeyFramesType;
 
 	struct KLAYGE_CORE_API AnimationAction
 	{
@@ -281,24 +268,20 @@ namespace KlayGE
 		uint32_t start_frame;
 		uint32_t end_frame;
 	};
-	typedef std::vector<AnimationAction> AnimationActionsType;
 
 	class KLAYGE_CORE_API SkinnedModel : public RenderModel
 	{
 	public:
-		typedef std::vector<Joint> JointsType;
-		typedef std::vector<float4> RotationsType;
+		explicit SkinnedModel(SceneNodePtr const & root_node);
+		SkinnedModel(std::wstring_view name, uint32_t node_attrib);
 
-	public:
-		explicit SkinnedModel(std::wstring const & name);
-		virtual ~SkinnedModel()
-		{
-		}
-
-		virtual bool IsSkinned() const
+		bool IsSkinned() const override
 		{
 			return true;
 		}
+
+		void CloneDataFrom(RenderModel const & source,
+			std::function<StaticMeshPtr(std::wstring_view)> const & CreateMeshFactoryFunc = CreateMeshFactory<StaticMesh>) override;
 
 		Joint& GetJoint(uint32_t index)
 		{
@@ -319,21 +302,21 @@ namespace KlayGE
 			joints_.assign(first, last);
 			this->UpdateBinds();
 		}
-		RotationsType const & GetBindRealParts() const
+		std::vector<float4> const & GetBindRealParts() const
 		{
 			return bind_reals_;
 		}
-		RotationsType const & GetBindDualParts() const
+		std::vector<float4> const & GetBindDualParts() const
 		{
 			return bind_duals_;
 		}
-		void AttachKeyFrames(std::shared_ptr<KeyFramesType> const & kf)
+		void AttachKeyFrameSets(std::shared_ptr<std::vector<KeyFrameSet>> const & kf)
 		{
-			key_frames_ = kf;
+			key_frame_sets_ = kf;
 		}
-		std::shared_ptr<KeyFramesType> const & GetKeyFrames() const
+		std::shared_ptr<std::vector<KeyFrameSet>> const & GetKeyFrameSets() const
 		{
-			return key_frames_;
+			return key_frame_sets_;
 		}
 		uint32_t NumFrames() const
 		{
@@ -358,10 +341,10 @@ namespace KlayGE
 		void RebindJoints();
 		void UnbindJoints();
 
-		virtual AABBox FramePosBound(uint32_t frame) const;
+		AABBox FramePosBound(uint32_t frame) const;
 
-		void AttachActions(std::shared_ptr<AnimationActionsType> const & actions);
-		std::shared_ptr<AnimationActionsType> const & GetActions() const
+		void AttachActions(std::shared_ptr<std::vector<AnimationAction>> const & actions);
+		std::shared_ptr<std::vector<AnimationAction>> const & GetActions() const
 		{
 			return actions_;
 		}
@@ -373,128 +356,97 @@ namespace KlayGE
 		void UpdateBinds();
 
 	protected:
-		JointsType joints_;
-		RotationsType bind_reals_;
-		RotationsType bind_duals_;
+		std::vector<Joint> joints_;
+		std::vector<float4> bind_reals_;
+		std::vector<float4> bind_duals_;
 
-		std::shared_ptr<KeyFramesType> key_frames_;
+		std::shared_ptr<std::vector<KeyFrameSet>> key_frame_sets_;
 		float last_frame_;
 
 		uint32_t num_frames_;
 		uint32_t frame_rate_;
 
-		std::shared_ptr<AnimationActionsType> actions_;
+		std::shared_ptr<std::vector<AnimationAction>> actions_;
 	};
 
 	class KLAYGE_CORE_API SkinnedMesh : public StaticMesh
 	{
 	public:
-		SkinnedMesh(RenderModelPtr const & model, std::wstring const & name);
-		virtual ~SkinnedMesh()
-		{
-		}
+		explicit SkinnedMesh(std::wstring_view name);
 
-		virtual AABBox FramePosBound(uint32_t frame) const;
-		void AttachFramePosBounds(std::shared_ptr<AABBKeyFrames> const & frame_pos_aabbs);
-		std::shared_ptr<AABBKeyFrames> const & GetFramePosBounds() const
+		AABBox FramePosBound(uint32_t frame) const;
+		void AttachFramePosBounds(std::shared_ptr<AABBKeyFrameSet> const & frame_pos_aabbs);
+		std::shared_ptr<AABBKeyFrameSet> const & GetFramePosBounds() const
 		{
 			return frame_pos_aabbs_;
 		}
 
 	private:
-		std::shared_ptr<AABBKeyFrames> frame_pos_aabbs_;
+		std::shared_ptr<AABBKeyFrameSet> frame_pos_aabbs_;
 	};
 
 
-	template <typename T>
-	struct CreateMeshFactory
-	{
-		StaticMeshPtr operator()(RenderModelPtr const & model, std::wstring const & name)
-		{
-			return MakeSharedPtr<T>(model, name);
-		}
-	};
+	KLAYGE_CORE_API RenderModelPtr SyncLoadModel(std::string_view model_name, uint32_t access_hint,
+		uint32_t node_attrib,
+		std::function<void(RenderModel&)> OnFinishLoading = nullptr,
+		std::function<RenderModelPtr(std::wstring_view, uint32_t)> CreateModelFactoryFunc = CreateModelFactory<RenderModel>,
+		std::function<StaticMeshPtr(std::wstring_view)> CreateMeshFactoryFunc = CreateMeshFactory<StaticMesh>);
+	KLAYGE_CORE_API RenderModelPtr ASyncLoadModel(std::string_view model_name, uint32_t access_hint,
+		uint32_t node_attrib,
+		std::function<void(RenderModel&)> OnFinishLoading = nullptr,
+		std::function<RenderModelPtr(std::wstring_view, uint32_t)> CreateModelFactoryFunc = CreateModelFactory<RenderModel>,
+		std::function<StaticMeshPtr(std::wstring_view)> CreateMeshFactoryFunc = CreateMeshFactory<StaticMesh>);
+	KLAYGE_CORE_API RenderModelPtr LoadSoftwareModel(std::string_view model_name);
 
-	template <typename T>
-	struct CreateModelFactory
-	{
-		RenderModelPtr operator()(std::wstring const & name)
-		{
-			return MakeSharedPtr<T>(name);
-		}
-	};
-
-	template <typename T>
-	struct CreateSceneObjectFactory
-	{
-		SceneObjectPtr operator()(RenderModelPtr const & model)
-		{
-			return MakeSharedPtr<T>(model, SceneObject::SOA_Cullable);
-		}
-	};
-
-	KLAYGE_CORE_API void LoadModel(std::string const & meshml_name, std::vector<RenderMaterialPtr>& mtls,
-		std::vector<vertex_element>& merged_ves, char& all_is_index_16_bit,
-		std::vector<std::vector<uint8_t>>& merged_buff, std::vector<uint8_t>& merged_indices,
-		std::vector<std::string>& mesh_names, std::vector<int32_t>& mtl_ids,
-		std::vector<AABBox>& pos_bbs, std::vector<AABBox>& tc_bbs,
-		std::vector<uint32_t>& mesh_num_vertices, std::vector<uint32_t>& mesh_base_vertices,
-		std::vector<uint32_t>& mesh_num_triangles, std::vector<uint32_t>& mesh_base_triangles,
-		std::vector<Joint>& joints, std::shared_ptr<AnimationActionsType>& actions,
-		std::shared_ptr<KeyFramesType>& kfs, uint32_t& num_frames, uint32_t& frame_rate,
-		std::vector<std::shared_ptr<AABBKeyFrames>>& frame_pos_bbs);
-	KLAYGE_CORE_API RenderModelPtr SyncLoadModel(std::string const & meshml_name, uint32_t access_hint,
-		std::function<RenderModelPtr(std::wstring const &)> CreateModelFactoryFunc = CreateModelFactory<RenderModel>(),
-		std::function<StaticMeshPtr(RenderModelPtr const &, std::wstring const &)> CreateMeshFactoryFunc = CreateMeshFactory<StaticMesh>());
-	KLAYGE_CORE_API RenderModelPtr ASyncLoadModel(std::string const & meshml_name, uint32_t access_hint,
-		std::function<RenderModelPtr(std::wstring const &)> CreateModelFactoryFunc = CreateModelFactory<RenderModel>(),
-		std::function<StaticMeshPtr(RenderModelPtr const &, std::wstring const &)> CreateMeshFactoryFunc = CreateMeshFactory<StaticMesh>());
-
-	KLAYGE_CORE_API void SaveModel(std::string const & meshml_name, std::vector<RenderMaterialPtr> const & mtls,
-		std::vector<vertex_element> const & merged_ves, char all_is_index_16_bit, 
-		std::vector<std::vector<uint8_t>> const & merged_buffs, std::vector<uint8_t> const & merged_indices,
-		std::vector<std::string> const & mesh_names, std::vector<int32_t> const & mtl_ids,
-		std::vector<AABBox> const & pos_bbs, std::vector<AABBox> const & tc_bbs,
-		std::vector<uint32_t>& mesh_num_vertices, std::vector<uint32_t>& mesh_base_vertices,
-		std::vector<uint32_t>& mesh_num_triangles, std::vector<uint32_t>& mesh_base_triangles,
-		std::vector<Joint> const & joints, std::shared_ptr<AnimationActionsType> const & actions,
-		std::shared_ptr<KeyFramesType> const & kfs, uint32_t num_frames, uint32_t frame_rate);
-	KLAYGE_CORE_API void SaveModel(RenderModelPtr const & model, std::string const & meshml_name);
+	KLAYGE_CORE_API void SaveModel(RenderModel const & model, std::string_view model_name);
 
 
 	class KLAYGE_CORE_API RenderableLightSourceProxy : public StaticMesh
 	{
 	public:
-		RenderableLightSourceProxy(RenderModelPtr const & model, std::wstring const & name);
-		virtual void Technique(RenderTechniquePtr const & tech);
+		explicit RenderableLightSourceProxy(std::wstring_view name);
 
-		virtual void Update();
+		void Technique(RenderEffectPtr const & effect, RenderTechnique* tech) override;
 
-		virtual void OnRenderBegin();
+		void AttachLightSrc(LightSourcePtr const & light);
 
-		virtual void AttachLightSrc(LightSourcePtr const & light);
+		void OnRenderBegin() override;
+
+	protected:
+		void DoBuildMeshInfo(RenderModel const & model) override
+		{
+			KFL_UNUSED(model);
+		}
 
 	private:
 		LightSourcePtr light_;
 
-		RenderEffectParameterPtr model_param_;
-		RenderEffectParameterPtr light_color_param_;
-		RenderEffectParameterPtr light_is_projective_param_;
-		RenderEffectParameterPtr projective_map_2d_tex_param_;
-		RenderEffectParameterPtr projective_map_cube_tex_param_;
+		RenderEffectParameter* light_is_projective_param_;
+		RenderEffectParameter* projective_map_2d_tex_param_;
+		RenderEffectParameter* projective_map_cube_tex_param_;
 	};
 
 	class KLAYGE_CORE_API RenderableCameraProxy : public StaticMesh
 	{
 	public:
-		RenderableCameraProxy(RenderModelPtr const & model, std::wstring const & name);
-		virtual void Technique(RenderTechniquePtr const & tech);
+		explicit RenderableCameraProxy(std::wstring_view name);
 
-		virtual void AttachCamera(CameraPtr const & camera);
+		void Technique(RenderEffectPtr const & effect, RenderTechnique* tech) override;
+
+		void AttachCamera(CameraPtr const & camera);
+
+	protected:
+		void DoBuildMeshInfo(RenderModel const & model) override
+		{
+			KFL_UNUSED(model);
+		}
 
 	private:
 		CameraPtr camera_;
 	};
+
+	KLAYGE_CORE_API RenderModelPtr LoadLightSourceProxyModel(LightSourcePtr const& light);
+	KLAYGE_CORE_API RenderModelPtr LoadCameraProxyModel(CameraPtr const& camera);
 }
 
 #endif			// _MESH_HPP

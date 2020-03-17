@@ -19,9 +19,9 @@
 #pragma once
 
 #include <KlayGE/PreDeclare.hpp>
+#include <KFL/CXX2a/span.hpp>
 
 #include <vector>
-#include <tuple>
 
 #include <KlayGE/GraphicsBuffer.hpp>
 #include <KlayGE/ElementFormat.hpp>
@@ -50,12 +50,12 @@ namespace KlayGE
 		VEU_Binormal
 	};
 
-	struct vertex_element
+	struct VertexElement
 	{
-		vertex_element()
+		VertexElement()
 		{
 		}
-		vertex_element(VertexElementUsage usage, uint8_t usage_index, ElementFormat format)
+		VertexElement(VertexElementUsage usage, uint8_t usage_index, ElementFormat format)
 			: usage(usage), usage_index(usage_index), format(format)
 		{
 		}
@@ -71,17 +71,16 @@ namespace KlayGE
 		}
 
 		friend bool
-		operator==(vertex_element const & lhs, vertex_element const & rhs)
+		operator==(VertexElement const & lhs, VertexElement const & rhs)
 		{
 			return (lhs.usage == rhs.usage)
 				&& (lhs.usage_index == rhs.usage_index)
 				&& (lhs.format == rhs.format);
 		}
 	};
-	typedef std::vector<vertex_element> vertex_elements_type;
 
 
-	class KLAYGE_CORE_API RenderLayout
+	class KLAYGE_CORE_API RenderLayout : boost::noncopyable
 	{
 	public:
 		enum topology_type
@@ -136,9 +135,7 @@ namespace KlayGE
 		};
 
 		RenderLayout();
-		virtual ~RenderLayout() = 0;
-
-		static RenderLayoutPtr NullObject();
+		virtual ~RenderLayout();
 
 		void TopologyType(topology_type type)
 		{
@@ -152,13 +149,12 @@ namespace KlayGE
 		void NumVertices(uint32_t n);
 		uint32_t NumVertices() const;
 
-		template <typename tuple_type>
-		void BindVertexStream(GraphicsBufferPtr const & buffer, tuple_type const & vertex_elems,
+		void BindVertexStream(GraphicsBufferPtr const & buffer, VertexElement const& vet,
 			stream_type type = ST_Geometry, uint32_t freq = 1)
 		{
-			this->BindVertexStream(buffer, Tuple2Vector<tuple_type, std::tuple_size<tuple_type>::value>::Do(vertex_elems), type, freq);
+			this->BindVertexStream(buffer, MakeSpan<1>(vet), type, freq);
 		}
-		void BindVertexStream(GraphicsBufferPtr const & buffer, vertex_elements_type const & vet,
+		void BindVertexStream(GraphicsBufferPtr const & buffer, std::span<VertexElement const> vet,
 			stream_type type = ST_Geometry, uint32_t freq = 1);
 
 		uint32_t NumVertexStreams() const
@@ -174,16 +170,11 @@ namespace KlayGE
 			vertex_streams_[index].stream = gb;
 			streams_dirty_ = true;
 		}
-		template <typename tuple_type>
-		void VertexStreamFormat(uint32_t index, tuple_type const & vertex_elems)
+		void VertexStreamFormat(uint32_t index, std::span<VertexElement const> vet)
 		{
-			this->VertexStreamFormat(index, Tuple2Vector<tuple_type, std::tuple_size<tuple_type>::value>::Do(vertex_elems));
-		}
-		void VertexStreamFormat(uint32_t index, vertex_elements_type const & vet)
-		{
-			vertex_streams_[index].format = vet;
+			vertex_streams_[index].format.assign(vet.begin(), vet.end());
 			uint32_t size = 0;
-			for (size_t i = 0; i < vet.size(); ++ i)
+			for (int i = 0; i < vet.size(); ++ i)
 			{
 				size += vet[i].element_size();
 			}
@@ -191,7 +182,7 @@ namespace KlayGE
 
 			streams_dirty_ = true;
 		}
-		vertex_elements_type const & VertexStreamFormat(uint32_t index) const
+		std::vector<VertexElement> const & VertexStreamFormat(uint32_t index) const
 		{
 			return vertex_streams_[index].format;
 		}
@@ -227,7 +218,7 @@ namespace KlayGE
 
 		GraphicsBufferPtr const & InstanceStream() const;
 		void InstanceStream(GraphicsBufferPtr const & buffer);
-		vertex_elements_type const & InstanceStreamFormat() const
+		std::vector<VertexElement> const & InstanceStreamFormat() const
 		{
 			return instance_stream_.format;
 		}
@@ -252,35 +243,13 @@ namespace KlayGE
 		void IndirectArgsOffset(uint32_t offset);
 		uint32_t IndirectArgsOffset() const;
 
-		void ExpandInstance(GraphicsBufferPtr& hint, uint32_t inst_no) const;
-
-	private:
-		template <typename tuple_type, int N>
-		struct Tuple2Vector
-		{
-			static vertex_elements_type Do(tuple_type const & t)
-			{
-				vertex_elements_type ret = Tuple2Vector<tuple_type, N - 1>::Do(t);
-				ret.push_back(std::get<N - 1>(t));
-				return ret;
-			}
-		};
-		template <typename tuple_type>
-		struct Tuple2Vector<tuple_type, 1>
-		{
-			static vertex_elements_type Do(tuple_type const & t)
-			{
-				return vertex_elements_type(1, std::get<0>(t));
-			}
-		};
-
 	protected:
 		topology_type topo_type_;
 
 		struct StreamUnit
 		{
 			GraphicsBufferPtr stream;
-			vertex_elements_type format;
+			std::vector<VertexElement> format;
 			uint32_t vertex_size;
 
 			stream_type type;

@@ -9,13 +9,13 @@
 
 #include <numeric>
 #include <boost/assert.hpp>
-#ifdef KLAYGE_COMPILER_CLANG
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wunused-parameter" // Ignore unused parameter in boost
+#if defined(KLAYGE_COMPILER_GCC)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wstrict-aliasing" // Ignore aliasing in flat_tree.hpp
 #endif
 #include <boost/container/flat_map.hpp>
-#ifdef KLAYGE_COMPILER_CLANG
-#pragma clang diagnostic pop
+#if defined(KLAYGE_COMPILER_GCC)
+#pragma GCC diagnostic pop
 #endif
 
 #include "AsciiArtsPP.hpp"
@@ -102,7 +102,7 @@ namespace
 		init_data.slice_pitch = 0;
 
 		return Context::Instance().RenderFactoryInstance().MakeTexture2D(OUTPUT_NUM_ASCII * ASCII_WIDTH,
-			ASCII_HEIGHT, 1, 1, EF_R8, 1, 0, EAH_GPU_Read | EAH_Immutable, &init_data);
+			ASCII_HEIGHT, 1, 1, EF_R8, 1, 0, EAH_GPU_Read | EAH_Immutable, MakeSpan<1>(init_data));
 	}
 
 	class ascii_lums_builder
@@ -170,7 +170,7 @@ namespace
 				float char_lum = *iter / max_lum * output_num_ascii_;
 				if (ret.find(char_lum) == ret.end())
 				{
-					KLAYGE_EMPLACE(ret, char_lum, static_cast<uint8_t>(iter - lums.begin()));
+					ret.emplace(char_lum, static_cast<uint8_t>(iter - lums.begin()));
 				}
 			}
 			BOOST_ASSERT(ret.size() >= output_num_ascii_);
@@ -199,7 +199,7 @@ namespace
 					diff_lum = iter->first;
 				}
 
-				diff_lum_to_iter.push_back(std::make_pair(diff_lum, iter));
+				diff_lum_to_iter.emplace_back(diff_lum, iter);
 			}
 			BOOST_ASSERT(diff_lum_to_iter.size() >= output_num_ascii_);
 
@@ -237,36 +237,40 @@ namespace
 }
 
 AsciiArtsPostProcess::AsciiArtsPostProcess()
-	: PostProcess(L"AsciiArts",
-			std::vector<std::string>(),
-			std::vector<std::string>(1, "src_tex"),
-			std::vector<std::string>(1, "output"),
-			SyncLoadRenderEffect("AsciiArtsPP.fxml")->TechniqueByName("AsciiArts"))
+	: PostProcess(L"AsciiArts", false,
+			MakeSpan<std::string>(),
+			MakeSpan<std::string>({"src_tex"}),
+			MakeSpan<std::string>({"output"}),
+			RenderEffectPtr(), nullptr)
 {
+	auto effect = SyncLoadRenderEffect("AsciiArtsPP.fxml");
+	this->Technique(effect, effect->TechniqueByName("AsciiArts"));
+
 	ascii_lums_builder builder(INPUT_NUM_ASCII, OUTPUT_NUM_ASCII, ASCII_WIDTH, ASCII_HEIGHT);
 
-	downsampler_ = SyncLoadPostProcess("Copy.ppml", "bilinear_copy");
+	downsampler_ = SyncLoadPostProcess("Copy.ppml", "BilinearCopy");
 
-	cell_per_row_line_ep_ = technique_->Effect().ParameterByName("cell_per_row_line");
-	*(technique_->Effect().ParameterByName("lums_tex")) = FillTexture(builder.build(LoadFromKFont("gkai00mp.kfont")));
+	cell_per_row_line_ep_ = effect->ParameterByName("cell_per_row_line");
+	*(effect->ParameterByName("lums_tex")) = FillTexture(builder.build(LoadFromKFont("gkai00mp.kfont")));
 }
 
-void AsciiArtsPostProcess::InputPin(uint32_t index, TexturePtr const & tex)
+void AsciiArtsPostProcess::InputPin(uint32_t index, ShaderResourceViewPtr const& srv)
 {
 	RenderFactory& rf = Context::Instance().RenderFactoryInstance();
 
+	auto const* tex = srv->TextureResource().get();
 	downsample_tex_ = rf.MakeTexture2D(tex->Width(0) / 2, tex->Height(0) / 2,
-		4, 1, tex->Format(), 1, 0, EAH_GPU_Read | EAH_GPU_Write | EAH_Generate_Mips, nullptr);
+		4, 1, tex->Format(), 1, 0, EAH_GPU_Read | EAH_GPU_Write | EAH_Generate_Mips);
 
-	downsampler_->InputPin(index, tex);
-	downsampler_->OutputPin(index, downsample_tex_);
+	downsampler_->InputPin(index, srv);
+	downsampler_->OutputPin(index, rf.Make2DRtv(downsample_tex_, 0, 1, 0));
 
-	PostProcess::InputPin(index, downsample_tex_);
+	PostProcess::InputPin(index, rf.MakeTextureSrv(downsample_tex_));
 
 	*cell_per_row_line_ep_ = float2(static_cast<float>(CELL_WIDTH) / tex->Width(0), static_cast<float>(CELL_HEIGHT) / tex->Height(0));
 }
 
-TexturePtr const & AsciiArtsPostProcess::InputPin(uint32_t index) const
+ShaderResourceViewPtr const& AsciiArtsPostProcess::InputPin(uint32_t index) const
 {
 	return downsampler_->InputPin(index);
 }

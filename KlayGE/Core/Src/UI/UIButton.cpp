@@ -20,12 +20,8 @@
 namespace KlayGE
 {
 	UIButton::UIButton(UIDialogPtr const & dialog)
-					: UIControl(UIButton::Type, dialog),
-						pressed_(false)
+					: UIButton(UIButton::Type, dialog)
 	{
-		hotkey_ = 0;
-
-		this->InitDefaultElements();
 	}
 
 	UIButton::UIButton(uint32_t type, UIDialogPtr const & dialog)
@@ -34,26 +30,6 @@ namespace KlayGE
 	{
 		hotkey_ = 0;
 
-		this->InitDefaultElements();
-	}
-
-	UIButton::UIButton(UIDialogPtr const & dialog, int ID, std::wstring const & strText, int4 const & coord_size, uint8_t hotkey, bool bIsDefault)
-					: UIControl(UIButton::Type, dialog),
-						pressed_(false),
-						text_(strText)
-	{
-		this->InitDefaultElements();
-
-		// Set the ID and list index
-		this->SetID(ID);
-		this->SetLocation(coord_size.x(), coord_size.y());
-		this->SetSize(coord_size.z(), coord_size.w());
-		this->SetHotkey(hotkey);
-		this->SetIsDefault(bIsDefault);
-	}
-
-	void UIButton::InitDefaultElements()
-	{
 		UIElement Element;
 
 		// Button
@@ -64,7 +40,7 @@ namespace KlayGE
 			Element.TextureColor().States[UICS_Pressed] = Color(1, 1, 1, 200.0f / 255);
 			Element.FontColor().States[UICS_MouseOver] = Color(0, 0, 0, 1.0f);
 
-			elements_.push_back(MakeSharedPtr<UIElement>(Element));
+			elements_.push_back(MakeUniquePtr<UIElement>(Element));
 		}
 
 		// Fill layer
@@ -74,8 +50,21 @@ namespace KlayGE
 			Element.TextureColor().States[UICS_Pressed] = Color(0, 0, 0, 60.0f / 255);
 			Element.TextureColor().States[UICS_Focus] = Color(1, 1, 1, 30.0f / 255);
 
-			elements_.push_back(MakeSharedPtr<UIElement>(Element));
+			elements_.push_back(MakeUniquePtr<UIElement>(Element));
 		}
+	}
+
+	UIButton::UIButton(UIDialogPtr const & dialog, int ID, std::wstring const & strText, int4 const & coord_size, uint8_t hotkey, bool bIsDefault)
+					: UIButton(dialog)
+	{
+		this->SetText(strText);
+
+		// Set the ID and list index
+		this->SetID(ID);
+		this->SetLocation(coord_size.x(), coord_size.y());
+		this->SetSize(coord_size.z(), coord_size.w());
+		this->SetHotkey(hotkey);
+		this->SetIsDefault(bIsDefault);
 	}
 
 	void UIButton::KeyDownHandler(UIDialog const & /*sender*/, uint32_t key)
@@ -160,29 +149,27 @@ namespace KlayGE
 			iState = UICS_Hidden;
 		}
 
-		// Background fill layer
-		//TODO: remove magic numbers
-		UIElementPtr pElement = elements_[0];
+		// TODO: remove magic numbers
 
-		IRect rcWindow = bounding_box_;
+		// Background fill layer
+		auto& bg_element = *elements_[0];
 
 		// Blend current color
-		pElement->TextureColor().SetState(iState);
-		pElement->FontColor().SetState(iState);
+		bg_element.TextureColor().SetState(iState);
+		bg_element.FontColor().SetState(iState);
 
-		this->GetDialog()->DrawSprite(*pElement, rcWindow);
-		this->GetDialog()->DrawString(text_, *pElement, rcWindow);
+		this->GetDialog()->DrawSprite(bg_element, bounding_box_);
+		this->GetDialog()->DrawString(text_, bg_element, bounding_box_);
 
 		// Main button
-		pElement = elements_[1];
-
+		auto& main_button_element = *elements_[1];
 
 		// Blend current color
-		pElement->TextureColor().SetState(iState);
-		pElement->FontColor().SetState(iState);
+		main_button_element.TextureColor().SetState(iState);
+		main_button_element.FontColor().SetState(iState);
 
-		this->GetDialog()->DrawSprite(*pElement, rcWindow);
-		this->GetDialog()->DrawString(text_, *pElement, rcWindow);
+		this->GetDialog()->DrawSprite(main_button_element, bounding_box_);
+		this->GetDialog()->DrawString(text_, main_button_element, bounding_box_);
 	}
 
 	std::wstring const & UIButton::GetText() const

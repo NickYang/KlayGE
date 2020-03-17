@@ -1,6 +1,8 @@
 <?xml version='1.0'?>
 
 <effect>
+	<macro name="LIGHT_BATCH" value="32"/>
+
 	<include name="DeferredRendering.fxml"/>
 
 	<cbuffer name="overlap_test">
@@ -19,18 +21,9 @@
 	</cbuffer>
 	<parameter type="texture2D" name="min_max_depth_tex"/>
 	<parameter type="texture2D" name="light_index_tex"/>
-	<macro name="LT_Ambient" value="0"/>
-	<macro name="LT_Sun" value="1"/>
-	<macro name="LT_Directional" value="2"/>
-	<macro name="LT_Point" value="3"/>
-	<macro name="LT_Spot" value="4"/>
 	
 	<shader>
 		<![CDATA[
-#if KLAYGE_SHADER_MODEL >= SHADER_MODEL(4, 0)
-#define INTEGER_SUPPORT 1
-#endif
- 
 void DrawLightIndexVS(float4 pos : POSITION,
 			out float2 oTexCoord : TEXCOORD0,
 			out float4 oPos : SV_Position)
@@ -102,13 +95,12 @@ int OverlapTestSpot(float4 planes[6], int light_index)
 
 float4 DrawLightIndexPointPS(float2 tc : TEXCOORD0) : SV_Target
 {
-	float2 min_max = ReadTwoHalf(min_max_depth_tex.Sample(point_sampler, tc), depth_near_far_invfar.y);
+	float2 min_max = min_max_depth_tex.Sample(point_sampler, tc).xy;
 	float4 planes[6];
 	CalcTileViewFrustum(tc, min_max, planes);
 
 	int num_lights = int(lights_attrib[0].w);
 
-#if INTEGER_SUPPORT
 	uint accum = 0;
 
 	for (int index = 0; index < num_lights; ++ index)
@@ -121,55 +113,16 @@ float4 DrawLightIndexPointPS(float2 tc : TEXCOORD0) : SV_Target
 
 	return float4(uint4(accum & 0xFF, accum >> 8,
 		accum >> 16, accum >> 24) & 0xFF) / 255.0f;
-#else
-	float all_light_id[4] = { 0, 0, 0, 0 };
-
-	int nl = LIGHT_BATCH;
-	// TODO: DXBC2GLSL has a problem in min(int, int)
-	if (num_lights < nl)
-	{
-		nl = num_lights;
-	}
-
-#if LIGHT_BATCH > 4
-	int index = 0;
-	for (int comp = 0, li = 0; li < nl; li += 8, ++ comp)
-	{
-		uint accum = 0;
-		for (uint mask = 1; mask < 256; mask += mask, ++ index)
-		{
-			if (OverlapTestPoint(planes, index))
-			{
-				accum += mask;
-			}
-		}
-
-		all_light_id[comp] = (accum + 0.5f) / 255.0f;
-	}
-#else
-	[unroll]
-	for (int index = 0; index < nl; ++ index)
-	{
-		if (OverlapTestPoint(planes, index))
-		{
-			all_light_id[index] = 1;
-		}
-	}
-#endif
-
-	return float4(all_light_id);
-#endif
 }
 
 float4 DrawLightIndexSpotPS(float2 tc : TEXCOORD0) : SV_Target
 {
-	float2 min_max = ReadTwoHalf(min_max_depth_tex.Sample(point_sampler, tc), depth_near_far_invfar.y);
+	float2 min_max = min_max_depth_tex.Sample(point_sampler, tc).xy;
 	float4 planes[6];
 	CalcTileViewFrustum(tc, min_max, planes);
 	
 	int num_lights = int(lights_attrib[0].w);
 
-#if INTEGER_SUPPORT
 	uint accum = 0;
 	
 	for (int index = 0; index < num_lights; ++ index)
@@ -182,44 +135,6 @@ float4 DrawLightIndexSpotPS(float2 tc : TEXCOORD0) : SV_Target
 
 	return float4(uint4(accum & 0xFF, accum >> 8,
 		accum >> 16, accum >> 24) & 0xFF) / 255.0f;
-#else
-	float all_light_id[4] = { 0, 0, 0, 0 };
-
-	int nl = LIGHT_BATCH;
-	// TODO: DXBC2GLSL has a problem in min(int, int)
-	if (num_lights < nl)
-	{
-		nl = num_lights;
-	}
-
-#if LIGHT_BATCH > 4
-	int index = 0;
-	for (int comp = 0, li = 0; li < nl; li += 8, ++ comp)
-	{
-		uint accum = 0;
-		for (uint mask = 1; mask < 256; mask += mask, ++ index)
-		{
-			if (OverlapTestSpot(planes, index))
-			{
-				accum += mask;
-			}
-		}
-		
-		all_light_id[comp] = (accum + 0.5f) / 255.0f;
-	}
-#else
-	[unroll]
-	for (int index = 0; index < nl; ++ index)
-	{
-		if (OverlapTestSpot(planes, index))
-		{
-			all_light_id[index] = 1;
-		}
-	}
-#endif
-
-	return float4(all_light_id);
-#endif
 }
 
 void LIDRVS(float4 pos : POSITION,
@@ -237,65 +152,41 @@ void LIDRVS(float4 pos : POSITION,
 
 float4 LIDRAmbientPS(float2 tc : TEXCOORD0, float3 view_dir : TEXCOORD1) : SV_Target
 {
-	float4 ndc = g_buffer_tex.Sample(point_sampler, tc);
+	float4 rt0 = g_buffer_rt0_tex.Sample(point_sampler, tc);
+	float4 rt1 = g_buffer_rt1_tex.Sample(point_sampler, tc);
+	float4 rt2 = g_buffer_rt2_tex.Sample(point_sampler, tc);
 	view_dir = normalize(view_dir);
-	float3 normal = GetNormal(ndc);
-	float shininess = GetShininess(ndc);
+	float3 normal = GetNormal(rt0);
+	float glossiness = GetGlossiness(rt0);
+	float shininess = Glossiness2Shininess(glossiness);
+	float3 c_diff = GetDiffuse(rt1);
+	float3 c_spec = GetSpecular(rt1);
+	float occlusion = GetOcclusion(rt2);
 
-	float4 lighting = CalcColor(0.5f + 0.5f * dot(light_dir_es.xyz, normal), 0, 1, 1, light_color, light_attrib);
-	
-	float4 mrt1 = g_buffer_1_tex.Sample(point_sampler, tc);
-	float4 shading = float4(Shading(lighting, shininess, GetDiffuse(mrt1), GetSpecular(mrt1), -view_dir, normal), 1);
-	shading += SkylightShading(shininess, mrt1, normal, -view_dir);
-	return shading;
-}
-
-float4 LIDRSunPS(float2 tc : TEXCOORD0, float3 view_dir : TEXCOORD1) : SV_Target
-{
-#if KLAYGE_DERIVATIVES
-	float2 tc_ddx = ddx(tc);
-	float2 tc_ddy = ddy(tc);
-#else
-	float2 tc_ddx = 0;
-	float2 tc_ddy = 0;
-#endif
-	
-	float4 shading = 0;
-
-	float4 ndc = g_buffer_tex.Sample(point_sampler, tc);
-	float3 normal = GetNormal(ndc);
-
-	float3 dir = light_dir_es.xyz;
-	float n_dot_l = dot(normal, dir);
-	if (n_dot_l > 0)
-	{
-		view_dir = normalize(view_dir);
-
-		float spec = roughness_term(normalize(dir - view_dir), normal, GetShininess(ndc)).x;
-		float3 shadow = 1;
-		if (shadowing_channel >= 0)
-		{
-			shadow = NearestDepthUpsamplingShadow(tc, tc_ddx, tc_ddy, shadowing_channel).xyz;
-		}
-		float4 lighting = CalcColor(n_dot_l, spec, 1, shadow, light_color, light_attrib);
-
-		float shininess = GetShininess(ndc);
-		float4 mrt1 = g_buffer_1_tex.Sample(point_sampler, tc);
-		shading = float4(Shading(lighting, shininess, GetDiffuse(mrt1), GetSpecular(mrt1), -view_dir, normal), 1);
-	}
-	
-	return shading;
+	float n_dot_l = 0.5f + 0.5f * dot(light_dir_es.xyz, normal);
+	float3 halfway = normalize(light_dir_es.xyz - view_dir);
+	float4 shading = float4(max(c_diff * light_attrib.x * n_dot_l, 0) * light_color.rgb, 1);
+	shading += SkylightShading(glossiness, c_diff, c_spec, normal, -view_dir);
+	return shading * float4(occlusion.xxx, 1);
 }
 
 float4 LIDRDirectionalPS(float2 tc : TEXCOORD0, float3 view_dir : TEXCOORD1) : SV_Target
 {
-	float4 lighting = 0;
+	float2 tc_ddx = ddx(tc);
+	float2 tc_ddy = ddy(tc);
+	
+	float3 shading = 0;
 
-	float4 ndc = g_buffer_tex.Sample(point_sampler, tc);
+	float4 rt0 = g_buffer_rt0_tex.Sample(point_sampler, tc);
+	float4 rt1 = g_buffer_rt1_tex.Sample(point_sampler, tc);
+	float4 rt2 = g_buffer_rt1_tex.Sample(point_sampler, tc);
 	view_dir = normalize(view_dir);
-	float3 pos_es = view_dir * (ReadAFloat(depth_tex.Sample(point_sampler, tc), depth_near_far_invfar.y) / view_dir.z);
-	float3 normal = GetNormal(ndc);
-	float shininess = GetShininess(ndc);
+	float3 pos_es = view_dir * (depth_tex.Sample(point_sampler, tc).x / view_dir.z);
+	float3 normal = GetNormal(rt0);
+	float shininess = Glossiness2Shininess(GetGlossiness(rt0));
+	float3 c_diff = GetDiffuse(rt1);
+	float3 c_spec = GetSpecular(rt1);
+	float occlusion = GetOcclusion(rt2);
 	
 	int num_lights = int(lights_attrib[0].w);
 
@@ -305,19 +196,24 @@ float4 LIDRDirectionalPS(float2 tc : TEXCOORD0, float3 view_dir : TEXCOORD1) : S
 		float n_dot_l = dot(normal, dir);
 		if (n_dot_l > 0)
 		{
-			float spec = roughness_term(normalize(dir - view_dir), normal, shininess).x;
-			lighting += CalcColor(n_dot_l, spec, 1, 1, lights_color[i], lights_attrib[i]);
+			float3 shadow = 1;
+#if WITH_SHADOW
+			shadow = NearestDepthUpsamplingShadow(tc, tc_ddx, tc_ddy, shadowing_channel).xyz;
+#endif
+
+			float3 halfway = normalize(dir - view_dir);
+			float3 spec = SpecularTerm(c_spec, dir, halfway, normal, shininess);
+			shading = max((c_diff * lights_attrib[i].x + spec * lights_attrib[i].y) * n_dot_l, 0) * lights_color[i].rgb * shadow;
 		}
 	}
-
-	float4 mrt1 = g_buffer_1_tex.Sample(point_sampler, tc);
-	return float4(Shading(lighting, shininess, GetDiffuse(mrt1), GetSpecular(mrt1), -view_dir, normal), 1);
+	
+	return float4(shading * occlusion, 1);
 }
 
-float4 CalcLIDRLighting(float3 light_pos, int index, int shadowing_channel, float3 pos_es, float3 normal, float3 view_dir,
-		float shininess, float2 tc, float atten, float irradiance_factor, float2 tc_ddx, float2 tc_ddy)
+float3 CalcLIDRShading(float3 light_pos, int index, int shadowing_channel, float3 pos_es, float3 normal, float3 view_dir,
+		float3 c_diff, float3 c_spec, float spec_normalize, float shininess, float2 tc, float atten, float2 tc_ddx, float2 tc_ddy)
 {
-	float4 lighting = 0;
+	float3 shading = 0;
 	float3 dir = light_pos - pos_es;
 	float dist = length(dir);
 	if (dist < lights_falloff_range[index].w)
@@ -331,144 +227,102 @@ float4 CalcLIDRLighting(float3 light_pos, int index, int shadowing_channel, floa
 			shadow = NearestDepthUpsamplingShadow(tc, tc_ddx, tc_ddy, shadowing_channel).xyz;
 #endif
 
-			float spec = roughness_term(normalize(dir - view_dir), normal, shininess).x;
-			lighting = CalcColor(n_dot_l, spec, atten, shadow, irradiance_factor * lights_color[index], lights_attrib[index]);
+			float3 halfway = normalize(dir - view_dir);
+			float3 spec = spec_normalize * DistributionTerm(halfway, normal, shininess)
+				* FresnelTerm(dir, halfway, c_spec);			
+			shading = max((c_diff * lights_attrib[index].x + spec * lights_attrib[index].y) * (n_dot_l * atten), 0)
+				* lights_color[index].rgb * shadow;
 		}
 	}
 
-	return lighting;
+	return shading;
 }
 
-float4 CalcLIDRPointLighting(int index, float3 pos_es, float3 normal, float3 view_dir,
-		float shininess, float2 tc, float2 tc_ddx, float2 tc_ddy)
+float3 CalcLIDRPointShading(int index, float3 pos_es, float3 normal, float3 view_dir,
+		float3 c_diff, float3 c_spec, float spec_normalize, float shininess, float2 tc, float2 tc_ddx, float2 tc_ddy)
 {
 	float3 light_pos = lights_pos_es[index].xyz;
-	return CalcLIDRLighting(light_pos, index, int(lights_attrib[index].z), pos_es, normal, view_dir,
-		shininess, tc,
-		attenuation_term(light_pos, pos_es, lights_falloff_range[index].xyz), 1, tc_ddx, tc_ddy);
+	return CalcLIDRShading(light_pos, index, int(lights_attrib[index].z), pos_es, normal, view_dir,
+		c_diff, c_spec, spec_normalize, shininess, tc,
+		AttenuationTerm(light_pos, pos_es, lights_falloff_range[index].xyz), tc_ddx, tc_ddy);
 }
 
-float4 CalcLIDRSpotLighting(int index, float3 pos_es, float3 normal, float3 view_dir,
-		float shininess, float2 tc, float2 tc_ddx, float2 tc_ddy)
+float3 CalcLIDRSpotShading(int index, float3 pos_es, float3 normal, float3 view_dir,
+		float3 c_diff, float3 c_spec, float spec_normalize, float shininess, float2 tc, float2 tc_ddx, float2 tc_ddy)
 {
 	float3 light_pos = lights_pos_es[index].xyz;
-	float4 lighting = 0;
-	float spot = spot_lighting(light_pos, lights_dir_es[index].xyz,
+	float3 shading = 0;
+	float spot = SpotLighting(light_pos, lights_dir_es[index].xyz,
 		float2(lights_pos_es[index].w, lights_dir_es[index].w), pos_es);
 	if (spot > 0)
 	{
-		lighting = CalcLIDRLighting(light_pos, index, int(lights_attrib[index].z), pos_es, normal, view_dir,
-			shininess, tc,
-			spot * attenuation_term(light_pos, pos_es, lights_falloff_range[index].xyz), 1, tc_ddx, tc_ddy);
+		shading = CalcLIDRShading(light_pos, index, int(lights_attrib[index].z), pos_es, normal, view_dir,
+			c_diff, c_spec, spec_normalize, shininess, tc,
+			spot * AttenuationTerm(light_pos, pos_es, lights_falloff_range[index].xyz), tc_ddx, tc_ddy);
 	}
 	
-	return lighting;
+	return shading;
 }
 
-float4 CalcLIDRSphereAreaLighting(int index, float3 pos_es, float3 normal, float3 view_dir,
-		float shininess, float2 tc, float2 tc_ddx, float2 tc_ddy)
+float3 CalcLIDRSphereAreaShading(int index, float3 pos_es, float3 normal, float3 view_dir,
+		float3 c_diff, float3 c_spec, float spec_normalize, float shininess, float2 tc, float2 tc_ddx, float2 tc_ddy)
 {
 	float3 light_pos = lights_pos_es[index].xyz;
 	light_pos = SphereAreaLightPositionFixup(light_pos, lights_radius_extend[index].x, pos_es,
 		normal, view_dir);
 	shininess = AreaLightShininessFixup(shininess, light_pos, lights_radius_extend[index].x, pos_es);
-	return CalcLIDRLighting(light_pos, index, int(lights_attrib[index].z), pos_es, normal, view_dir,
-		shininess, tc, 
-		attenuation_term(lights_pos_es[index].xyz, pos_es, lights_falloff_range[index].xyz), 1, tc_ddx, tc_ddy);
+	return CalcLIDRShading(light_pos, index, int(lights_attrib[index].z), pos_es, normal, view_dir,
+		c_diff, c_spec, spec_normalize, shininess, tc, 
+		AttenuationTerm(lights_pos_es[index].xyz, pos_es, lights_falloff_range[index].xyz), tc_ddx, tc_ddy);
 }
 
-float4 CalcLIDRTubeAreaLighting(int index, float3 pos_es, float3 normal, float3 view_dir,
-		float shininess, float2 tc, float2 tc_ddx, float2 tc_ddy)
+float3 CalcLIDRTubeAreaShading(int index, float3 pos_es, float3 normal, float3 view_dir,
+		float3 c_diff, float3 c_spec, float spec_normalize, float shininess, float2 tc, float2 tc_ddx, float2 tc_ddy)
 {
 	float3 l0 = lights_pos_es[index].xyz - lights_radius_extend[index].yzw - pos_es;
 	float3 l1 = lights_pos_es[index].xyz + lights_radius_extend[index].yzw - pos_es;
 	float3 light_pos = TubeAreaLightPositionFixup(l0, l1, pos_es, normal, view_dir);
 	float2 atten_irra_factor = TubeAreaLightAttenuationIrradianceFixup(l0, l1, normal);
 	shininess = AreaLightShininessFixup(shininess, lights_pos_es[index].xyz, lights_radius_extend[index].x, pos_es);
-	return CalcLIDRLighting(light_pos, index, int(lights_attrib[index].z), pos_es, normal, view_dir,
-		shininess, tc, atten_irra_factor.x, atten_irra_factor.y, tc_ddx, tc_ddy);
+	return CalcLIDRShading(light_pos, index, int(lights_attrib[index].z), pos_es, normal, view_dir,
+		c_diff, c_spec, spec_normalize, shininess, tc, atten_irra_factor.x * atten_irra_factor.y, tc_ddx, tc_ddy);
 }
 
 float4 LIDRPointPS(float2 tc : TEXCOORD0, float3 view_dir : TEXCOORD1) : SV_Target
 {
-#if KLAYGE_DERIVATIVES
 	float2 tc_ddx = ddx(tc);
 	float2 tc_ddy = ddy(tc);
-#else
-	float2 tc_ddx = 0;
-	float2 tc_ddy = 0;
-#endif
 
 	int num_lights = int(lights_attrib[0].w);
 	
-	float4 shading = 0;
+	float4 shading = float4(0, 0, 0, 1);
 	float2 tc_to_tile_scale = float2(lights_attrib[1].w, lights_attrib[2].w);
 	int4 light_index = light_index_tex.Sample(point_sampler, tc * tc_to_tile_scale) * 255 + 0.5f;
 	if (any(light_index))
 	{
-		float4 lighting = 0;
-		float4 ndc = g_buffer_tex.Sample(point_sampler, tc);
+		float4 rt0 = g_buffer_rt0_tex.Sample(point_sampler, tc);
+		float4 rt1 = g_buffer_rt1_tex.Sample(point_sampler, tc);
+		float4 rt2 = g_buffer_rt2_tex.Sample(point_sampler, tc);
 		view_dir = normalize(view_dir);
-		float3 pos_es = view_dir * (ReadAFloat(depth_tex.Sample(point_sampler, tc), depth_near_far_invfar.y) / view_dir.z);
-		float3 normal = GetNormal(ndc);
-		float shininess = GetShininess(ndc);
+		float3 pos_es = view_dir * (depth_tex.Sample(point_sampler, tc).x / view_dir.z);
+		float3 normal = GetNormal(rt0);
+		float shininess = Glossiness2Shininess(GetGlossiness(rt0));
+		float3 c_diff = GetDiffuse(rt1);
+		float3 c_spec = GetSpecular(rt1);
+		float spec_normalize = SpecularNormalizeFactor(shininess);
+		float occlusion = GetOcclusion(rt2);
 
-#if INTEGER_SUPPORT
 		uint light_index_all = light_index.x | (light_index.y << 8) | (light_index.z << 16) | (light_index.w << 24);
 		uint nl = countbits(light_index_all);
 		for (uint il = 0; il < nl; ++ il)
 		{
 			uint index = firstbitlow(light_index_all);
-			lighting += CalcLIDRPointLighting(index, pos_es, normal, view_dir, shininess, tc, tc_ddx, tc_ddy);
+			shading.rgb += CalcLIDRPointShading(index, pos_es, normal, view_dir, c_diff, c_spec, spec_normalize, shininess,
+				tc, tc_ddx, tc_ddy);
 			light_index_all = light_index_all & (light_index_all - 1);
 		}
-#else
-#if WITH_SHADOW
-		int nl = 4;
-#else
-		int nl = LIGHT_BATCH;
-#endif
-		// TODO: DXBC2GLSL has a problem in min(int, int)
-		if (num_lights < nl)
-		{
-			nl = num_lights;
-		}
 
-#if LIGHT_BATCH > 4
-		for (uint comp = 0, li = 0; li < nl; ++ comp, li += 8)
-		{
-			uint index = li + 7;
-			uint mask = 128;
-			uint light_comp = light_index[comp];
-
-			[loop]
-			while (mask > 0)
-			{
-				[branch]
-				if (mask <= light_comp)
-				{
-					lighting += CalcLIDRPointLighting(index, pos_es, normal, view_dir, shininess, tc, tc_ddx, tc_ddy);
-					light_comp -= mask;
-				}
-
-				mask /= 2;
-				-- index;
-			}
-		}
-#else
-		[unroll]
-		for (int index = 0; index < nl; ++ index)
-		{
-			if (light_index[index])
-			{
-				lighting += CalcLIDRPointLighting(index, pos_es, normal, view_dir, shininess, tc, tc_ddx, tc_ddy);
-			}
-		}
-#endif
-#endif
-
-		float4 mrt1 = g_buffer_1_tex.Sample(point_sampler, tc);
-		shading = float4(Shading(lighting, shininess, GetDiffuse(mrt1), GetSpecular(mrt1), -view_dir, normal), 1);
+		shading *= float4(occlusion.xxx, 1);
 	}
 
 	return shading;
@@ -476,84 +330,39 @@ float4 LIDRPointPS(float2 tc : TEXCOORD0, float3 view_dir : TEXCOORD1) : SV_Targ
 
 float4 LIDRSpotPS(float2 tc : TEXCOORD0, float3 view_dir : TEXCOORD1) : SV_Target
 {
-#if KLAYGE_DERIVATIVES
 	float2 tc_ddx = ddx(tc);
 	float2 tc_ddy = ddy(tc);
-#else
-	float2 tc_ddx = 0;
-	float2 tc_ddy = 0;
-#endif
 
 	int num_lights = int(lights_attrib[0].w);
 	
-	float4 shading = 0;
+	float4 shading = float4(0, 0, 0, 1);
 	float2 tc_to_tile_scale = float2(lights_attrib[1].w, lights_attrib[2].w);
 	int4 light_index = light_index_tex.Sample(point_sampler, tc * tc_to_tile_scale) * 255 + 0.5f;
 	if (any(light_index))
 	{
-		float4 lighting = 0;
-		float4 ndc = g_buffer_tex.Sample(point_sampler, tc);
+		float4 rt0 = g_buffer_rt0_tex.Sample(point_sampler, tc);
+		float4 rt1 = g_buffer_rt1_tex.Sample(point_sampler, tc);
+		float4 rt2 = g_buffer_rt2_tex.Sample(point_sampler, tc);
 		view_dir = normalize(view_dir);
-		float3 pos_es = view_dir * (ReadAFloat(depth_tex.Sample(point_sampler, tc), depth_near_far_invfar.y) / view_dir.z);
-		float3 normal = GetNormal(ndc);
-		float shininess = GetShininess(ndc);
+		float3 pos_es = view_dir * (depth_tex.Sample(point_sampler, tc).x / view_dir.z);
+		float3 normal = GetNormal(rt0);
+		float shininess = Glossiness2Shininess(GetGlossiness(rt0));
+		float3 c_diff = GetDiffuse(rt1);
+		float3 c_spec = GetSpecular(rt1);
+		float spec_normalize = SpecularNormalizeFactor(shininess);
+		float occlusion = GetOcclusion(rt2);
 
-#if INTEGER_SUPPORT
 		uint light_index_all = light_index.x | (light_index.y << 8) | (light_index.z << 16) | (light_index.w << 24);
 		uint nl = countbits(light_index_all);
 		for (uint il = 0; il < nl; ++ il)
 		{
 			uint index = firstbitlow(light_index_all);
-			lighting += CalcLIDRSpotLighting(index, pos_es, normal, view_dir, shininess, tc, tc_ddx, tc_ddy);
+			shading.rgb += CalcLIDRSpotShading(index, pos_es, normal, view_dir, c_diff, c_spec, spec_normalize, shininess,
+				tc, tc_ddx, tc_ddy);
 			light_index_all = light_index_all & (light_index_all - 1);
 		}
-#else
-#if WITH_SHADOW
-		int nl = 4;
-#else
-		int nl = LIGHT_BATCH;
-#endif
-		// TODO: DXBC2GLSL has a problem in min(int, int)
-		if (num_lights < nl)
-		{
-			nl = num_lights;
-		}
 
-#if LIGHT_BATCH > 4
-		for (uint comp = 0, li = 0; li < nl; ++ comp, li += 8)
-		{
-			uint index = li + 7;
-			uint mask = 128;
-			uint light_comp = light_index[comp];
-
-			[loop]
-			while (mask > 0)
-			{
-				[branch]
-				if (mask <= light_comp)
-				{
-					lighting += CalcLIDRSpotLighting(index, pos_es, normal, view_dir, shininess, tc, tc_ddx, tc_ddy);
-					light_comp -= mask;
-				}
-
-				mask /= 2;
-				-- index;
-			}
-		}
-#else
-		[unroll]
-		for (int index = 0; index < nl; ++ index)
-		{
-			if (light_index[index])
-			{
-				lighting += CalcLIDRSpotLighting(index, pos_es, normal, view_dir, shininess, tc, tc_ddx, tc_ddy);
-			}
-		}
-#endif
-#endif
-
-		float4 mrt1 = g_buffer_1_tex.Sample(point_sampler, tc);
-		shading = float4(Shading(lighting, shininess, GetDiffuse(mrt1), GetSpecular(mrt1), -view_dir, normal), 1);
+		shading *= float4(occlusion.xxx, 1);
 	}
 
 	return shading;
@@ -561,84 +370,39 @@ float4 LIDRSpotPS(float2 tc : TEXCOORD0, float3 view_dir : TEXCOORD1) : SV_Targe
 
 float4 LIDRSphereAreaPS(float2 tc : TEXCOORD0, float3 view_dir : TEXCOORD1) : SV_Target
 {
-#if KLAYGE_DERIVATIVES
 	float2 tc_ddx = ddx(tc);
 	float2 tc_ddy = ddy(tc);
-#else
-	float2 tc_ddx = 0;
-	float2 tc_ddy = 0;
-#endif
 
 	int num_lights = int(lights_attrib[0].w);
 	
-	float4 shading = 0;
+	float4 shading = float4(0, 0, 0, 1);
 	float2 tc_to_tile_scale = float2(lights_attrib[1].w, lights_attrib[2].w);
 	int4 light_index = light_index_tex.Sample(point_sampler, tc * tc_to_tile_scale) * 255 + 0.5f;
 	if (any(light_index))
 	{
-		float4 lighting = 0;
-		float4 ndc = g_buffer_tex.Sample(point_sampler, tc);
+		float4 rt0 = g_buffer_rt0_tex.Sample(point_sampler, tc);
+		float4 rt1 = g_buffer_rt1_tex.Sample(point_sampler, tc);
+		float4 rt2 = g_buffer_rt2_tex.Sample(point_sampler, tc);
 		view_dir = normalize(view_dir);
-		float3 pos_es = view_dir * (ReadAFloat(depth_tex.Sample(point_sampler, tc), depth_near_far_invfar.y) / view_dir.z);
-		float3 normal = GetNormal(ndc);
-		float shininess = GetShininess(ndc);
+		float3 pos_es = view_dir * (depth_tex.Sample(point_sampler, tc).x / view_dir.z);
+		float3 normal = GetNormal(rt0);
+		float shininess = Glossiness2Shininess(GetGlossiness(rt0));
+		float3 c_diff = GetDiffuse(rt1);
+		float3 c_spec = GetSpecular(rt1);
+		float spec_normalize = SpecularNormalizeFactor(shininess);
+		float occlusion = GetOcclusion(rt2);
 
-#if INTEGER_SUPPORT
 		uint light_index_all = light_index.x | (light_index.y << 8) | (light_index.z << 16) | (light_index.w << 24);
 		uint nl = countbits(light_index_all);
 		for (uint il = 0; il < nl; ++ il)
 		{
 			uint index = firstbitlow(light_index_all);
-			lighting += CalcLIDRSphereAreaLighting(index, pos_es, normal, view_dir, shininess, tc, tc_ddx, tc_ddy);
+			shading.rgb += CalcLIDRSphereAreaShading(index, pos_es, normal, view_dir, c_diff, c_spec, spec_normalize, shininess,
+				tc, tc_ddx, tc_ddy);
 			light_index_all = light_index_all & (light_index_all - 1);
 		}
-#else
-#if WITH_SHADOW
-		int nl = 4;
-#else
-		int nl = LIGHT_BATCH;
-#endif
-		// TODO: DXBC2GLSL has a problem in min(int, int)
-		if (num_lights < nl)
-		{
-			nl = num_lights;
-		}
 
-#if LIGHT_BATCH > 4
-		for (uint comp = 0, li = 0; li < nl; ++ comp, li += 8)
-		{
-			uint index = li + 7;
-			uint mask = 128;
-			uint light_comp = light_index[comp];
-
-			[loop]
-			while (mask > 0)
-			{
-				[branch]
-				if (mask <= light_comp)
-				{
-					lighting += CalcLIDRSphereAreaLighting(index, pos_es, normal, view_dir, shininess, tc, tc_ddx, tc_ddy);
-					light_comp -= mask;
-				}
-
-				mask /= 2;
-				-- index;
-			}
-		}
-#else
-		[unroll]
-		for (int index = 0; index < nl; ++ index)
-		{
-			if (light_index[index])
-			{
-				lighting += CalcLIDRSphereAreaLighting(index, pos_es, normal, view_dir, shininess, tc, tc_ddx, tc_ddy);
-			}
-		}
-#endif
-#endif
-
-		float4 mrt1 = g_buffer_1_tex.Sample(point_sampler, tc);
-		shading = float4(Shading(lighting, shininess, GetDiffuse(mrt1), GetSpecular(mrt1), -view_dir, normal), 1);
+		shading *= float4(occlusion.xxx, 1);
 	}
 
 	return shading;
@@ -647,84 +411,39 @@ float4 LIDRSphereAreaPS(float2 tc : TEXCOORD0, float3 view_dir : TEXCOORD1) : SV
 
 float4 LIDRTubeAreaPS(float2 tc : TEXCOORD0, float3 view_dir : TEXCOORD1) : SV_Target
 {
-#if KLAYGE_DERIVATIVES
 	float2 tc_ddx = ddx(tc);
 	float2 tc_ddy = ddy(tc);
-#else
-	float2 tc_ddx = 0;
-	float2 tc_ddy = 0;
-#endif
 
 	int num_lights = int(lights_attrib[0].w);
 	
-	float4 shading = 0;
+	float4 shading = float4(0, 0, 0, 1);
 	float2 tc_to_tile_scale = float2(lights_attrib[1].w, lights_attrib[2].w);
 	int4 light_index = light_index_tex.Sample(point_sampler, tc * tc_to_tile_scale) * 255 + 0.5f;
 	if (any(light_index))
 	{
-		float4 lighting = 0;
-		float4 ndc = g_buffer_tex.Sample(point_sampler, tc);
+		float4 rt0 = g_buffer_rt0_tex.Sample(point_sampler, tc);
+		float4 rt1 = g_buffer_rt1_tex.Sample(point_sampler, tc);
+		float4 rt2 = g_buffer_rt2_tex.Sample(point_sampler, tc);
 		view_dir = normalize(view_dir);
-		float3 pos_es = view_dir * (ReadAFloat(depth_tex.Sample(point_sampler, tc), depth_near_far_invfar.y) / view_dir.z);
-		float3 normal = GetNormal(ndc);
-		float shininess = GetShininess(ndc);
+		float3 pos_es = view_dir * (depth_tex.Sample(point_sampler, tc).x / view_dir.z);
+		float3 normal = GetNormal(rt0);
+		float shininess = Glossiness2Shininess(GetGlossiness(rt0));
+		float3 c_diff = GetDiffuse(rt1);
+		float3 c_spec = GetSpecular(rt1);
+		float spec_normalize = SpecularNormalizeFactor(shininess);
+		float occlusion = GetOcclusion(rt2);
 
-#if INTEGER_SUPPORT
 		uint light_index_all = light_index.x | (light_index.y << 8) | (light_index.z << 16) | (light_index.w << 24);
 		uint nl = countbits(light_index_all);
 		for (uint il = 0; il < nl; ++ il)
 		{
 			uint index = firstbitlow(light_index_all);
-			lighting += CalcLIDRTubeAreaLighting(index, pos_es, normal, view_dir, shininess, tc, tc_ddx, tc_ddy);
+			shading.rgb += CalcLIDRTubeAreaShading(index, pos_es, normal, view_dir, c_diff, c_spec, spec_normalize, shininess,
+				tc, tc_ddx, tc_ddy);
 			light_index_all = light_index_all & (light_index_all - 1);
 		}
-#else
-#if WITH_SHADOW
-		int nl = 4;
-#else
-		int nl = LIGHT_BATCH;
-#endif
-		// TODO: DXBC2GLSL has a problem in min(int, int)
-		if (num_lights < nl)
-		{
-			nl = num_lights;
-		}
 
-#if LIGHT_BATCH > 4
-		for (uint comp = 0, li = 0; li < nl; ++ comp, li += 8)
-		{
-			uint index = li + 7;
-			uint mask = 128;
-			uint light_comp = light_index[comp];
-
-			[loop]
-			while (mask > 0)
-			{
-				[branch]
-				if (mask <= light_comp)
-				{
-					lighting += CalcLIDRTubeAreaLighting(index, pos_es, normal, view_dir, shininess, tc, tc_ddx, tc_ddy);
-					light_comp -= mask;
-				}
-
-				mask /= 2;
-				-- index;
-			}
-		}
-#else
-		[unroll]
-		for (int index = 0; index < nl; ++ index)
-		{
-			if (light_index[index])
-			{
-				lighting += CalcLIDRTubeAreaLighting(index, pos_es, normal, view_dir, shininess, tc, tc_ddx, tc_ddy);
-			}
-		}
-#endif
-#endif
-
-		float4 mrt1 = g_buffer_1_tex.Sample(point_sampler, tc);
-		shading = float4(Shading(lighting, shininess, GetDiffuse(mrt1), GetSpecular(mrt1), -view_dir, normal), 1);
+		shading *= float4(occlusion.xxx, 1);
 	}
 
 	return shading;
@@ -769,7 +488,8 @@ float4 LIDRTubeAreaPS(float2 tc : TEXCOORD0, float3 view_dir : TEXCOORD1) : SV_T
 			<state name="pixel_shader" value="LIDRAmbientPS()"/>
 		</pass>
 	</technique>
-	<technique name="LIDRSun" inherit="LIDRAmbient">
+	<technique name="LIDRDirectionalShadow" inherit="LIDRAmbient">
+		<macro name="WITH_SHADOW" value="1"/>
 		<pass name="p0">
 			<state name="blend_enable" value="true"/>
 			<state name="blend_op" value="add"/>
@@ -779,15 +499,16 @@ float4 LIDRTubeAreaPS(float2 tc : TEXCOORD0, float3 view_dir : TEXCOORD1) : SV_T
 			<state name="src_blend_alpha" value="one"/>
 			<state name="dest_blend_alpha" value="one"/>
 
-			<state name="pixel_shader" value="LIDRSunPS()"/>
+			<state name="pixel_shader" value="LIDRDirectionalPS()"/>
 		</pass>
 	</technique>
-	<technique name="LIDRDirectional" inherit="LIDRSun">
+	<technique name="LIDRDirectionalNoShadow" inherit="LIDRDirectionalShadow">
+		<macro name="WITH_SHADOW" value="0"/>
 		<pass name="p0">
 			<state name="pixel_shader" value="LIDRDirectionalPS()"/>
 		</pass>
 	</technique>
-	<technique name="LIDRPointShadow" inherit="LIDRDirectional">
+	<technique name="LIDRPointShadow" inherit="LIDRDirectionalNoShadow">
 		<macro name="WITH_SHADOW" value="1"/>
 		<pass name="p0">
 			<state name="pixel_shader" value="LIDRPointPS()"/>
@@ -796,7 +517,7 @@ float4 LIDRTubeAreaPS(float2 tc : TEXCOORD0, float3 view_dir : TEXCOORD1) : SV_T
 	<technique name="LIDRPointNoShadow" inherit="LIDRPointShadow">
 		<macro name="WITH_SHADOW" value="0"/>
 	</technique>
-	<technique name="LIDRSpotShadow" inherit="LIDRDirectional">
+	<technique name="LIDRSpotShadow" inherit="LIDRDirectionalNoShadow">
 		<macro name="WITH_SHADOW" value="1"/>
 		<pass name="p0">
 			<state name="pixel_shader" value="LIDRSpotPS()"/>
@@ -805,7 +526,7 @@ float4 LIDRTubeAreaPS(float2 tc : TEXCOORD0, float3 view_dir : TEXCOORD1) : SV_T
 	<technique name="LIDRSpotNoShadow" inherit="LIDRSpotShadow">
 		<macro name="WITH_SHADOW" value="0"/>
 	</technique>
-	<technique name="LIDRSphereAreaShadow" inherit="LIDRDirectional">
+	<technique name="LIDRSphereAreaShadow" inherit="LIDRDirectionalNoShadow">
 		<macro name="WITH_SHADOW" value="1"/>
 		<pass name="p0">
 			<state name="pixel_shader" value="LIDRSphereAreaPS()"/>
@@ -814,7 +535,7 @@ float4 LIDRTubeAreaPS(float2 tc : TEXCOORD0, float3 view_dir : TEXCOORD1) : SV_T
 	<technique name="LIDRSphereAreaNoShadow" inherit="LIDRSphereAreaShadow">
 		<macro name="WITH_SHADOW" value="0"/>
 	</technique>
-	<technique name="LIDRTubeAreaShadow" inherit="LIDRDirectional">
+	<technique name="LIDRTubeAreaShadow" inherit="LIDRDirectionalNoShadow">
 		<macro name="WITH_SHADOW" value="1"/>
 		<pass name="p0">
 			<state name="pixel_shader" value="LIDRTubeAreaPS()"/>

@@ -4,10 +4,9 @@
 	<post_processor name="GBuffer2DepthDerivate">
 		<params>
 			<param name="delta_offset"/>
-			<param name="far_plane"/>
 		</params>
 		<input>
-			<pin name="g_buffer_tex"/>
+			<pin name="g_buffer_rt0_tex"/>
 			<pin name="depth_tex"/>
 		</input>
 		<output>
@@ -19,7 +18,6 @@
 	<post_processor name="DepthDerivateMipMap">
 		<params>
 			<param name="delta_offset"/>
-			<param name="far_plane"/>
 		</params>
 		<input>
 			<pin name="depth_deriv_tex"/>
@@ -35,7 +33,7 @@
 			<param name="delta_offset"/>
 		</params>
 		<input>
-			<pin name="g_buffer_tex"/>
+			<pin name="g_buffer_rt0_tex"/>
 		</input>
 		<output>
 			<pin name="output"/>

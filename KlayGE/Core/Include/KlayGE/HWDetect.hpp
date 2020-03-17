@@ -33,8 +33,6 @@
 
 #pragma once
 
-#include <boost/noncopyable.hpp>
-
 namespace KlayGE
 {
 	enum SMBiosType
@@ -65,7 +63,7 @@ namespace KlayGE
 		uint8_t firmware_major;				// 0x16 Major release for embedded firmware
 		uint8_t firmware_minor;				// 0x17 Minor release for embedded firmware
 
-		enum BIOSCharacteristics
+		enum BIOSCharacteristics : uint32_t
 		{
 			BCT_Reserved1 = 1UL << 0,
 			BCT_Reserved2 = 1UL << 1,
@@ -305,7 +303,7 @@ namespace KlayGE
 	};
 
 
-	class KLAYGE_CORE_API SMBios : boost::noncopyable
+	class KLAYGE_CORE_API SMBios final : boost::noncopyable
 	{
 	public:
 		static SMBios& Instance();

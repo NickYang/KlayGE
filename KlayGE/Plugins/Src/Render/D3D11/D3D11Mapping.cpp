@@ -11,7 +11,7 @@
 /////////////////////////////////////////////////////////////////////////////////
 
 #include <KlayGE/KlayGE.hpp>
-#include <KFL/ThrowErr.hpp>
+#include <KFL/ErrorHandling.hpp>
 #include <KFL/Util.hpp>
 #include <KFL/Math.hpp>
 #include <KlayGE/RenderFactory.hpp>
@@ -19,6 +19,7 @@
 #include <KlayGE/RenderEngine.hpp>
 #include <KlayGE/GraphicsBuffer.hpp>
 
+#include <system_error>
 #include <boost/assert.hpp>
 
 #include <KlayGE/D3D11/D3D11RenderEngine.hpp>
@@ -81,8 +82,7 @@ namespace KlayGE
 			return D3D11_COMPARISON_GREATER;
 
 		default:
-			BOOST_ASSERT(false);
-			return D3D11_COMPARISON_NEVER;
+			KFL_UNREACHABLE("Invalid compare function");
 		};
 	}
 
@@ -117,8 +117,7 @@ namespace KlayGE
 			return D3D11_STENCIL_OP_DECR;
 
 		default:
-			BOOST_ASSERT(false);
-			return D3D11_STENCIL_OP_KEEP;
+			KFL_UNREACHABLE("Invalid stencil operation");
 		};
 	}
 
@@ -144,8 +143,7 @@ namespace KlayGE
 			return D3D11_MAP_READ_WRITE;
 
 		default:
-			BOOST_ASSERT(false);
-			return D3D11_MAP_READ;
+			KFL_UNREACHABLE("Invalid texture map access mode");
 		};
 	}
 
@@ -205,8 +203,7 @@ namespace KlayGE
 			return D3D11_BLEND_INV_SRC1_COLOR;
 
 		default:
-			BOOST_ASSERT(false);
-			return D3D11_BLEND_ZERO;
+			KFL_UNREACHABLE("Invalid alpha blend factor");
 		}
 	}
 
@@ -224,8 +221,7 @@ namespace KlayGE
 			return D3D11_CULL_BACK;
 
 		default:
-			BOOST_ASSERT(false);
-			return D3D11_CULL_NONE;
+			KFL_UNREACHABLE("Invalid cull mode");
 		}
 	}
 
@@ -243,8 +239,7 @@ namespace KlayGE
 			return D3D11_FILL_SOLID;
 
 		default:
-			BOOST_ASSERT(false);
-			return D3D11_FILL_SOLID;
+			KFL_UNREACHABLE("Invalid polygon mode");
 		}
 	}
 
@@ -268,8 +263,7 @@ namespace KlayGE
 			return D3D11_BLEND_OP_MAX;
 
 		default:
-			BOOST_ASSERT(false);
-			return D3D11_BLEND_OP_ADD;
+			KFL_UNREACHABLE("Invalid blend operation");
 		}
 	}
 
@@ -290,8 +284,7 @@ namespace KlayGE
 			return D3D11_TEXTURE_ADDRESS_BORDER;
 
 		default:
-			BOOST_ASSERT(false);
-			return D3D11_TEXTURE_ADDRESS_CLAMP;
+			KFL_UNREACHABLE("Invalid texture addressing mode");
 		}
 	}
 
@@ -342,8 +335,7 @@ namespace KlayGE
 			return D3D11_FILTER_COMPARISON_ANISOTROPIC;
 
 		default:
-			BOOST_ASSERT(false);
-			return D3D11_FILTER_MIN_MAG_MIP_POINT;
+			KFL_UNREACHABLE("Invalid texture filter operation");
 		}
 	}
 
@@ -412,8 +404,7 @@ namespace KlayGE
 			return D3D11_LOGIC_OP_OR_INVERTED;
 
 		default:
-			BOOST_ASSERT(false);
-			return D3D11_LOGIC_OP_NOOP;
+			KFL_UNREACHABLE("Invalid logic operation");
 		}
 	}
 
@@ -545,19 +536,19 @@ namespace KlayGE
 			return D3D11_PRIMITIVE_TOPOLOGY_32_CONTROL_POINT_PATCHLIST;
 
 		default:
-			BOOST_ASSERT(false);
-			return D3D11_PRIMITIVE_TOPOLOGY_POINTLIST;
+			KFL_UNREACHABLE("Invalid topology type");
 		}
 	}
 
-	void D3D11Mapping::Mapping(std::vector<D3D11_INPUT_ELEMENT_DESC>& elements, size_t stream, vertex_elements_type const & vet, RenderLayout::stream_type type, uint32_t freq)
+	void D3D11Mapping::Mapping(std::vector<D3D11_INPUT_ELEMENT_DESC>& elements, size_t stream, std::span<VertexElement const> vet,
+		RenderLayout::stream_type type, uint32_t freq)
 	{
 		elements.resize(vet.size());
 
 		uint16_t elem_offset = 0;
 		for (uint32_t i = 0; i < elements.size(); ++ i)
 		{
-			vertex_element const & vs_elem = vet[i];
+			VertexElement const & vs_elem = vet[i];
 
 			D3D11_INPUT_ELEMENT_DESC& element = elements[i];
 			element.SemanticIndex = vs_elem.usage_index;
@@ -631,7 +622,7 @@ namespace KlayGE
 		}
 	}
 
-	D3D11_SO_DECLARATION_ENTRY D3D11Mapping::Mapping(ShaderDesc::StreamOutputDecl const & decl, uint8_t slot)
+	D3D11_SO_DECLARATION_ENTRY D3D11Mapping::Mapping(ShaderDesc::StreamOutputDecl const & decl)
 	{
 		D3D11_SO_DECLARATION_ENTRY ret;
 
@@ -639,7 +630,7 @@ namespace KlayGE
 		ret.SemanticIndex = decl.usage_index;
 		ret.StartComponent = decl.start_component;
 		ret.ComponentCount = decl.component_count;
-		ret.OutputSlot = slot;
+		ret.OutputSlot = decl.slot;
 		switch (decl.usage)
 		{
 		// Vertex xyzs
@@ -873,6 +864,9 @@ namespace KlayGE
 		case EF_D24S8:
 			return DXGI_FORMAT_D24_UNORM_S8_UINT;
 
+		case EF_X24G8:
+			return DXGI_FORMAT_X24_TYPELESS_G8_UINT;
+
 		case EF_D32F:
 			return DXGI_FORMAT_D32_FLOAT;
 			
@@ -895,7 +889,7 @@ namespace KlayGE
 			return DXGI_FORMAT_BC7_UNORM_SRGB;
 
 		default:
-			THR(errc::function_not_supported);
+			KFL_UNREACHABLE("Invalid format");
 		}
 	}
 
@@ -1083,6 +1077,9 @@ namespace KlayGE
 		case DXGI_FORMAT_D24_UNORM_S8_UINT:
 			return EF_D24S8;
 
+		case DXGI_FORMAT_X24_TYPELESS_G8_UINT:
+			return EF_X24G8;
+
 		case DXGI_FORMAT_D32_FLOAT:
 			return EF_D32F;
 
@@ -1105,7 +1102,7 @@ namespace KlayGE
 			return EF_BC7_SRGB;
 
 		default:
-			THR(errc::function_not_supported);
+			KFL_UNREACHABLE("Invalid format");
 		}
 	}
 }

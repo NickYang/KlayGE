@@ -34,58 +34,20 @@
 #pragma once
 
 #include <boost/assert.hpp>
-#ifdef KLAYGE_CXX11_LIBRARY_THREAD_SUPPORT
-	#include <thread>
-	#include <condition_variable>
-	#include <mutex>
-#else
-	#if defined(KLAYGE_COMPILER_GCC)
-		#pragma GCC diagnostic push
-		#pragma GCC diagnostic ignored "-Wunused-parameter" // Ignore unused parameter 'lk'
-	#endif
-	#include <boost/thread.hpp>
-	#if defined(KLAYGE_COMPILER_GCC)
-		#pragma GCC diagnostic pop
-	#endif
-	namespace std
-	{
-		using boost::thread;
-		using boost::condition_variable;
-		using boost::mutex;
-		using boost::unique_lock;
-		using boost::lock_guard;
-		namespace this_thread = boost::this_thread;
-	}
-#endif
-#ifdef KLAYGE_TS_LIBRARY_OPTIONAL_SUPPORT
-	#include <experimental/optional>
-#else
-
-#ifdef KLAYGE_COMPILER_CLANG
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wunused-parameter" // Ignore unused parameter 'out', 'v'
-#endif
-	#include <boost/optional.hpp>
-#ifdef KLAYGE_COMPILER_CLANG
-#pragma clang diagnostic pop
-#endif
-	namespace std
-	{
-		namespace experimental
-		{
-			using boost::optional;
-		}
-	}
-#endif
+#include <thread>
+#include <condition_variable>
+#include <mutex>
 #include <exception>
 #include <vector>
 #include <functional>
 
+#include <KFL/CXX17/optional.hpp>
+
 namespace KlayGE
 {
-	struct void_t
+	struct my_void_t
 	{
-		typedef void_t type;
+		typedef my_void_t type;
 	};
 
 	typedef std::thread::id thread_id;
@@ -107,7 +69,7 @@ namespace KlayGE
 	class bad_join : public std::exception
 	{
 	public:
-		const char* what() const KLAYGE_NOEXCEPT
+		const char* what() const noexcept
 		{
 			return "bad join";
 		}
@@ -121,12 +83,12 @@ namespace KlayGE
 	public:
 		// Representation of the storage to hold the return type:
 		//	if result_type == void
-		//		std::experimental::optional<void_t>
+		//		std::optional<my_void_t>
 		//	else
-		//		std::experimental::optional<result_type>
-		typedef std::experimental::optional<
+		//		std::optional<result_type>
+		typedef std::optional<
 			typename std::conditional<std::is_same<result_type, void>::value,
-				void_t, result_type>::type
+				my_void_t, result_type>::type
 			>  result_opt;
 
 		typedef typename std::conditional<std::is_same<result_type, void>::value,
@@ -178,7 +140,7 @@ namespace KlayGE
 			{
 				throw std::bad_exception();
 			}
-			return const_result_type_ref(result_->get());
+			return const_result_type_ref(*result_);
 		}
 
 		void detach()
@@ -300,7 +262,7 @@ namespace KlayGE
 			typedef typename std::result_of<Threadable()>::type		result_t;
 			typedef JoinerImpl										joiner_impl_t;
 			typedef typename JoinerImpl::result_opt					result_opt;
-			typedef std::experimental::optional<void_t>				void_optional_t;
+			typedef std::optional<my_void_t>						void_optional_t;
 
 			//Helper function to construct the optional from the
 			//return value and handle void return types
@@ -314,7 +276,7 @@ namespace KlayGE
 			static void construct_result(MainFunctionHolder& in, void_optional_t& out)
 			{
 				in.main_();
-				out = void_t();
+				out = my_void_t();
 			}
 
 		public:
@@ -391,7 +353,7 @@ namespace KlayGE
 			std::shared_ptr<result_opt> myreturn = MakeSharedPtr<result_opt>();
 			std::shared_ptr<threaded_t> mythreaded = MakeSharedPtr<threaded_t>(function, myreturn);
 			std::shared_ptr<joiner_impl_base<result_t>> myjoiner_data = MakeSharedPtr<joiner_impl_t>(myreturn,
-				bind(&threaded_t::needle, mythreaded));
+				[mythreaded] { threaded_t::needle(mythreaded); });
 
 			return joiner_t(myjoiner_data);
 		}
@@ -624,7 +586,7 @@ namespace KlayGE
 			std::shared_ptr<result_opt> myreturn = MakeSharedPtr<result_opt>();
 			std::shared_ptr<threaded_t> mythreaded = MakeSharedPtr<threaded_t>(function, myreturn);
 			std::shared_ptr<joiner_impl_base<result_t>> myjoiner_data = MakeSharedPtr<joiner_impl_t>(data_,
-				myreturn, std::bind(&threaded_t::needle, mythreaded));
+				myreturn, [mythreaded] { threaded_t::needle(mythreaded); });
 
 			return joiner_t(myjoiner_data);
 		}

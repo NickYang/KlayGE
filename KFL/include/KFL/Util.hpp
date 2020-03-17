@@ -34,6 +34,9 @@
 #pragma once
 
 #include <KFL/PreDeclare.hpp>
+#include <KFL/CXX17.hpp>
+#include <KFL/CXX17/string_view.hpp>
+#include <KFL/CXX2a/endian.hpp>
 
 #include <string>
 #include <functional>
@@ -41,6 +44,9 @@
 #include <boost/assert.hpp>
 
 #define KFL_UNUSED(x) (void)(x)
+
+// The opposite side of "explicit", for tracking purpose
+#define KFL_IMPLICIT
 
 #include <KFL/Log.hpp>
 
@@ -56,7 +62,7 @@ namespace KlayGE
 {
 	// 设第n bit为1
 	inline uint32_t
-	SetMask(uint32_t n)
+	SetMask(uint32_t n) noexcept
 		{ return 1UL << n; }
 	template <uint32_t n>
 	struct Mask
@@ -66,7 +72,7 @@ namespace KlayGE
 
 	// 取数中的第 n bit
 	inline uint32_t
-	GetBit(uint32_t x, uint32_t n)
+	GetBit(uint32_t x, uint32_t n) noexcept
 		{ return (x >> n) & 1; }
 	// 置数中的第 n bit为1
 	inline uint32_t
@@ -75,34 +81,34 @@ namespace KlayGE
 
 	// 取低字节
 	inline uint16_t
-	LO_U8(uint16_t x)
+	LO_U8(uint16_t x) noexcept
 		{ return x & 0xFF; }
 	// 取高字节
 	inline uint16_t
-	HI_U8(uint16_t x)
+	HI_U8(uint16_t x) noexcept
 		{ return x >> 8; }
 
 	// 取低字
 	inline uint32_t
-	LO_U16(uint32_t x)
+	LO_U16(uint32_t x) noexcept
 		{ return x & 0xFFFF; }
 	// 取高字
 	inline uint32_t
-	HI_U16(uint32_t x)
+	HI_U16(uint32_t x) noexcept
 		{ return x >> 16; }
 
 	// 高低字节交换
 	inline uint16_t
-	HI_LO_SwapU8(uint16_t x)
+	HI_LO_SwapU8(uint16_t x) noexcept
 		{ return (LO_U8(x) << 8) | HI_U8(x); }
 	// 高低字交换
 	inline uint32_t
-	HI_LO_SwapU16(uint32_t x)
+	HI_LO_SwapU16(uint32_t x) noexcept
 		{ return (LO_U16(x) << 16) | HI_U16(x); }
 
 	// 获得n位都是1的掩码
 	inline uint32_t
-	MakeMask(uint32_t n)
+	MakeMask(uint32_t n) noexcept
 		{ return (1UL << (n + 1)) - 1; }
 
 	// 产生FourCC常量
@@ -113,438 +119,118 @@ namespace KlayGE
 	};
 
 	// Unicode函数, 用于string, wstring之间的转换
-	std::string& Convert(std::string& strDest, std::string const & strSrc);
-	std::string& Convert(std::string& strDest, std::wstring const & wstrSrc);
-	std::wstring& Convert(std::wstring& wstrDest, std::string const & strSrc);
-	std::wstring& Convert(std::wstring& wstrDest, std::wstring const & wstrSrc);
+	std::string& Convert(std::string& dest, std::string_view src);
+	std::string& Convert(std::string& dest, std::wstring_view src);
+	std::wstring& Convert(std::wstring& dest, std::string_view src);
+	std::wstring& Convert(std::wstring& dest, std::wstring_view src);
 
 	// 暂停几毫秒
 	void Sleep(uint32_t ms);
 
 	// Endian的转换
 	template <int size>
-	void EndianSwitch(void* p);
+	void EndianSwitch(void* p) noexcept;
 
 	template <typename T>
-	T Native2BE(T x)
+	T Native2BE(T x) noexcept
 	{
-#ifdef KLAYGE_LITTLE_ENDIAN
-		EndianSwitch<sizeof(T)>(&x);
-#else
-		KFL_UNUSED(x);
-#endif
+		KLAYGE_IF_CONSTEXPR (std::endian::native == std::endian::little)
+		{
+			EndianSwitch<sizeof(T)>(&x);
+		}
 		return x;
 	}
 	template <typename T>
-	T Native2LE(T x)
+	T Native2LE(T x) noexcept
 	{
-#ifdef KLAYGE_LITTLE_ENDIAN
-		KFL_UNUSED(x);
-#else
-		EndianSwitch<sizeof(T)>(&x);
-#endif
+		KLAYGE_IF_CONSTEXPR (std::endian::native == std::endian::big)
+		{
+			EndianSwitch<sizeof(T)>(&x);
+		}
 		return x;
 	}
 
 	template <typename T>
-	T BE2Native(T x)
+	T BE2Native(T x) noexcept
 	{
 		return Native2BE(x);
 	}
 	template <typename T>
-	T LE2Native(T x)
+	T LE2Native(T x) noexcept
 	{
 		return Native2LE(x);
 	}
 
 
 	template <typename To, typename From>
-	inline To
-	checked_cast(From p)
+	inline To checked_cast(From* p) noexcept
+	{
+		BOOST_ASSERT(dynamic_cast<To>(p) == static_cast<To>(p));
+		return static_cast<To>(p);
+	}
+	
+	template <typename To, typename From>
+	inline To checked_cast(From const* p) noexcept
 	{
 		BOOST_ASSERT(dynamic_cast<To>(p) == static_cast<To>(p));
 		return static_cast<To>(p);
 	}
 
 	template <typename To, typename From>
-	inline std::shared_ptr<To>
-	checked_pointer_cast(std::shared_ptr<From> const & p)
+	inline typename std::add_rvalue_reference<To>::type checked_cast(From& p) noexcept
 	{
-		BOOST_ASSERT(std::dynamic_pointer_cast<To>(p) == std::static_pointer_cast<To>(p));
+		typedef typename std::remove_reference<To>::type RawToType;
+		BOOST_ASSERT(dynamic_cast<RawToType*>(&p) == static_cast<RawToType*>(&p));
+		return static_cast<RawToType&>(p);
+	}
+
+	template <typename To, typename From>
+	inline typename std::add_rvalue_reference<To const>::type checked_cast(From const& p) noexcept
+	{
+		typedef typename std::remove_reference<To const>::type RawToType;
+		BOOST_ASSERT(dynamic_cast<RawToType const*>(&p) == static_cast<RawToType const*>(&p));
+		return static_cast<RawToType const&>(p);
+	}
+
+	template <typename To, typename From>
+	inline std::shared_ptr<To>
+	checked_pointer_cast(std::shared_ptr<From> const & p) noexcept
+	{
+		BOOST_ASSERT(dynamic_cast<To*>(p.get()) == static_cast<To*>(p.get()));
 		return std::static_pointer_cast<To>(p);
 	}
 
 	uint32_t LastError();
 
-	std::string ReadShortString(ResIdentifierPtr const & res);
-	void WriteShortString(std::ostream& os, std::string const & str);
-
-#ifdef KLAYGE_CXX11_CORE_VARIADIC_TEMPLATES
-	template <typename T, typename... Args>
-	inline std::shared_ptr<T> MakeSharedPtr(Args&& ... args)
-	{
-		return std::shared_ptr<T>(new T(std::forward<Args>(args)...), std::default_delete<T>());
-	}
+	std::string ReadShortString(ResIdentifier& res);
+	void WriteShortString(std::ostream& os, std::string_view str);
 
 	template <typename T, typename... Args>
-	inline std::unique_ptr<T> MakeUniquePtr(Args&& ... args)
+	inline std::shared_ptr<T> MakeSharedPtr(Args&&... args)
 	{
-		return std::unique_ptr<T>(new T(std::forward<Args>(args)...), std::default_delete<T>());
-	}
-#else
-	template <typename T>
-	inline std::shared_ptr<T> MakeSharedPtr()
-	{
-		return std::shared_ptr<T>(new T, std::default_delete<T>());
+		return std::make_shared<T>(std::forward<Args>(args)...);
 	}
 
-	template <typename T, typename A1>
-	inline std::shared_ptr<T> MakeSharedPtr(A1 const & a1)
+	template <typename T, typename... Args>
+	inline std::unique_ptr<T> MakeUniquePtrHelper(std::false_type, Args&&... args)
 	{
-		return std::shared_ptr<T>(new T(a1), std::default_delete<T>());
+		return std::make_unique<T>(std::forward<Args>(args)...);
 	}
 
-	template <typename T, typename A1>
-	inline std::shared_ptr<T> MakeSharedPtr(A1& a1)
+	template <typename T, typename... Args>
+	inline std::unique_ptr<T> MakeUniquePtrHelper(std::true_type, size_t size)
 	{
-		return std::shared_ptr<T>(new T(a1), std::default_delete<T>());
+		static_assert(0 == std::extent<T>::value,
+			"make_unique<T[N]>() is forbidden, please use make_unique<T[]>().");
+
+		return std::make_unique<T>(size);
 	}
 
-	template <typename T, typename A1, typename A2>
-	inline std::shared_ptr<T> MakeSharedPtr(A1 const & a1, A2 const & a2)
+	template <typename T, typename... Args>
+	inline std::unique_ptr<T> MakeUniquePtr(Args&&... args)
 	{
-		return std::shared_ptr<T>(new T(a1, a2), std::default_delete<T>());
+		return MakeUniquePtrHelper<T>(std::is_array<T>(), std::forward<Args>(args)...);
 	}
-
-	template <typename T, typename A1, typename A2>
-	inline std::shared_ptr<T> MakeSharedPtr(A1& a1, A2& a2)
-	{
-		return std::shared_ptr<T>(new T(a1, a2), std::default_delete<T>());
-	}
-
-	template <typename T, typename A1, typename A2, typename A3>
-	inline std::shared_ptr<T> MakeSharedPtr(A1 const & a1, A2 const & a2, A3 const & a3)
-	{
-		return std::shared_ptr<T>(new T(a1, a2, a3), std::default_delete<T>());
-	}
-
-	template <typename T, typename A1, typename A2, typename A3>
-	inline std::shared_ptr<T> MakeSharedPtr(A1& a1, A2& a2, A3& a3)
-	{
-		return std::shared_ptr<T>(new T(a1, a2, a3), std::default_delete<T>());
-	}
-
-	template <typename T, typename A1, typename A2, typename A3, typename A4>
-	inline std::shared_ptr<T> MakeSharedPtr(A1 const & a1, A2 const & a2, A3 const & a3, A4 const & a4)
-	{
-		return std::shared_ptr<T>(new T(a1, a2, a3, a4), std::default_delete<T>());
-	}
-
-	template <typename T, typename A1, typename A2, typename A3, typename A4>
-	inline std::shared_ptr<T> MakeSharedPtr(A1& a1, A2& a2, A3& a3, A4& a4)
-	{
-		return std::shared_ptr<T>(new T(a1, a2, a3, a4), std::default_delete<T>());
-	}
-
-	template <typename T, typename A1, typename A2, typename A3, typename A4, typename A5>
-	inline std::shared_ptr<T> MakeSharedPtr(A1 const & a1, A2 const & a2, A3 const & a3, A4 const & a4,
-		A5 const & a5)
-	{
-		return std::shared_ptr<T>(new T(a1, a2, a3, a4, a5), std::default_delete<T>());
-	}
-
-	template <typename T, typename A1, typename A2, typename A3, typename A4, typename A5>
-	inline std::shared_ptr<T> MakeSharedPtr(A1& a1, A2& a2, A3& a3, A4& a4, A5& a5)
-	{
-		return std::shared_ptr<T>(new T(a1, a2, a3, a4, a5), std::default_delete<T>());
-	}
-
-	template <typename T, typename A1, typename A2, typename A3, typename A4, typename A5, typename A6>
-	inline std::shared_ptr<T> MakeSharedPtr(A1 const & a1, A2 const & a2, A3 const & a3, A4 const & a4,
-		A5 const & a5, A6 const & a6)
-	{
-		return std::shared_ptr<T>(new T(a1, a2, a3, a4, a5, a6), std::default_delete<T>());
-	}
-
-	template <typename T, typename A1, typename A2, typename A3, typename A4, typename A5, typename A6>
-	inline std::shared_ptr<T> MakeSharedPtr(A1& a1, A2& a2, A3& a3, A4& a4, A5& a5, A6& a6)
-	{
-		return std::shared_ptr<T>(new T(a1, a2, a3, a4, a5, a6), std::default_delete<T>());
-	}
-
-	template <typename T, typename A1, typename A2, typename A3, typename A4, typename A5, typename A6,
-		typename A7>
-	inline std::shared_ptr<T> MakeSharedPtr(A1 const & a1, A2 const & a2, A3 const & a3, A4 const & a4,
-		A5 const & a5, A6 const & a6, A7 const & a7)
-	{
-		return std::shared_ptr<T>(new T(a1, a2, a3, a4, a5, a6, a7), std::default_delete<T>());
-	}
-
-	template <typename T, typename A1, typename A2, typename A3, typename A4, typename A5, typename A6,
-		typename A7>
-	inline std::shared_ptr<T> MakeSharedPtr(A1& a1, A2& a2, A3& a3, A4& a4, A5& a5, A6& a6, A7& a7)
-	{
-		return std::shared_ptr<T>(new T(a1, a2, a3, a4, a5, a6, a7), std::default_delete<T>());
-	}
-
-	template <typename T, typename A1, typename A2, typename A3, typename A4, typename A5, typename A6,
-		typename A7, typename A8>
-	inline std::shared_ptr<T> MakeSharedPtr(A1 const & a1, A2 const & a2, A3 const & a3, A4 const & a4,
-		A5 const & a5, A6 const & a6, A7 const & a7, A8 const & a8)
-	{
-		return std::shared_ptr<T>(new T(a1, a2, a3, a4, a5, a6, a7, a8), std::default_delete<T>());
-	}
-
-	template <typename T, typename A1, typename A2, typename A3, typename A4, typename A5, typename A6,
-		typename A7, typename A8>
-	inline std::shared_ptr<T> MakeSharedPtr(A1& a1, A2& a2, A3& a3, A4& a4, A5& a5, A6& a6, A7& a7,
-		A8& a8)
-	{
-		return std::shared_ptr<T>(new T(a1, a2, a3, a4, a5, a6, a7, a8), std::default_delete<T>());
-	}
-
-	template <typename T, typename A1, typename A2, typename A3, typename A4, typename A5, typename A6,
-		typename A7, typename A8, typename A9>
-	inline std::shared_ptr<T> MakeSharedPtr(A1 const & a1, A2 const & a2, A3 const & a3, A4 const & a4,
-		A5 const & a5, A6 const & a6, A7 const & a7, A8 const & a8, A9 const & a9)
-	{
-		return std::shared_ptr<T>(new T(a1, a2, a3, a4, a5, a6, a7, a8, a9), std::default_delete<T>());
-	}
-
-	template <typename T, typename A1, typename A2, typename A3, typename A4, typename A5, typename A6,
-		typename A7, typename A8, typename A9>
-	inline std::shared_ptr<T> MakeSharedPtr(A1& a1, A2& a2, A3& a3, A4& a4, A5& a5, A6& a6, A7& a7,
-		A8& a8, A9& a9)
-	{
-		return std::shared_ptr<T>(new T(a1, a2, a3, a4, a5, a6, a7, a8, a9), std::default_delete<T>());
-	}
-
-	template <typename T, typename A1, typename A2, typename A3, typename A4, typename A5, typename A6,
-		typename A7, typename A8, typename A9, typename A10>
-	inline std::shared_ptr<T> MakeSharedPtr(A1 const & a1, A2 const & a2, A3 const & a3, A4 const & a4,
-		A5 const & a5, A6 const & a6, A7 const & a7, A8 const & a8, A9 const & a9, A10 const & a10)
-	{
-		return std::shared_ptr<T>(new T(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10), std::default_delete<T>());
-	}
-
-	template <typename T, typename A1, typename A2, typename A3, typename A4, typename A5, typename A6,
-		typename A7, typename A8, typename A9, typename A10>
-	inline std::shared_ptr<T> MakeSharedPtr(A1& a1, A2& a2, A3& a3, A4& a4, A5& a5, A6& a6, A7& a7,
-		A8& a8, A9& a9, A10& a10)
-	{
-		return std::shared_ptr<T>(new T(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10), std::default_delete<T>());
-	}
-
-
-	template <typename T>
-	inline std::unique_ptr<T> MakeUniquePtr()
-	{
-		return std::unique_ptr<T>(new T, std::default_delete<T>());
-	}
-
-	template <typename T, typename A1>
-	inline std::unique_ptr<T> MakeUniquePtr(A1 const & a1)
-	{
-		return std::unique_ptr<T>(new T(a1), std::default_delete<T>());
-	}
-
-	template <typename T, typename A1>
-	inline std::unique_ptr<T> MakeUniquePtr(A1& a1)
-	{
-		return std::unique_ptr<T>(new T(a1), std::default_delete<T>());
-	}
-
-	template <typename T, typename A1, typename A2>
-	inline std::unique_ptr<T> MakeUniquePtr(A1 const & a1, A2 const & a2)
-	{
-		return std::unique_ptr<T>(new T(a1, a2), std::default_delete<T>());
-	}
-
-	template <typename T, typename A1, typename A2>
-	inline std::unique_ptr<T> MakeUniquePtr(A1& a1, A2& a2)
-	{
-		return std::unique_ptr<T>(new T(a1, a2), std::default_delete<T>());
-	}
-
-	template <typename T, typename A1, typename A2, typename A3>
-	inline std::unique_ptr<T> MakeUniquePtr(A1 const & a1, A2 const & a2, A3 const & a3)
-	{
-		return std::unique_ptr<T>(new T(a1, a2, a3), std::default_delete<T>());
-	}
-
-	template <typename T, typename A1, typename A2, typename A3>
-	inline std::unique_ptr<T> MakeUniquePtr(A1& a1, A2& a2, A3& a3)
-	{
-		return std::unique_ptr<T>(new T(a1, a2, a3), std::default_delete<T>());
-	}
-
-	template <typename T, typename A1, typename A2, typename A3, typename A4>
-	inline std::unique_ptr<T> MakeUniquePtr(A1 const & a1, A2 const & a2, A3 const & a3, A4 const & a4)
-	{
-		return std::unique_ptr<T>(new T(a1, a2, a3, a4), std::default_delete<T>());
-	}
-
-	template <typename T, typename A1, typename A2, typename A3, typename A4>
-	inline std::unique_ptr<T> MakeUniquePtr(A1& a1, A2& a2, A3& a3, A4& a4)
-	{
-		return std::unique_ptr<T>(new T(a1, a2, a3, a4), std::default_delete<T>());
-	}
-
-	template <typename T, typename A1, typename A2, typename A3, typename A4, typename A5>
-	inline std::unique_ptr<T> MakeUniquePtr(A1 const & a1, A2 const & a2, A3 const & a3, A4 const & a4,
-		A5 const & a5)
-	{
-		return std::unique_ptr<T>(new T(a1, a2, a3, a4, a5), std::default_delete<T>());
-	}
-
-	template <typename T, typename A1, typename A2, typename A3, typename A4, typename A5>
-	inline std::unique_ptr<T> MakeUniquePtr(A1& a1, A2& a2, A3& a3, A4& a4, A5& a5)
-	{
-		return std::unique_ptr<T>(new T(a1, a2, a3, a4, a5), std::default_delete<T>());
-	}
-
-	template <typename T, typename A1, typename A2, typename A3, typename A4, typename A5, typename A6>
-	inline std::unique_ptr<T> MakeUniquePtr(A1 const & a1, A2 const & a2, A3 const & a3, A4 const & a4,
-		A5 const & a5, A6 const & a6)
-	{
-		return std::unique_ptr<T>(new T(a1, a2, a3, a4, a5, a6), std::default_delete<T>());
-	}
-
-	template <typename T, typename A1, typename A2, typename A3, typename A4, typename A5, typename A6>
-	inline std::unique_ptr<T> MakeUniquePtr(A1& a1, A2& a2, A3& a3, A4& a4, A5& a5, A6& a6)
-	{
-		return std::unique_ptr<T>(new T(a1, a2, a3, a4, a5, a6), std::default_delete<T>());
-	}
-
-	template <typename T, typename A1, typename A2, typename A3, typename A4, typename A5, typename A6,
-		typename A7>
-	inline std::unique_ptr<T> MakeUniquePtr(A1 const & a1, A2 const & a2, A3 const & a3, A4 const & a4,
-		A5 const & a5, A6 const & a6, A7 const & a7)
-	{
-		return std::unique_ptr<T>(new T(a1, a2, a3, a4, a5, a6, a7), std::default_delete<T>());
-	}
-
-	template <typename T, typename A1, typename A2, typename A3, typename A4, typename A5, typename A6,
-		typename A7>
-	inline std::unique_ptr<T> MakeUniquePtr(A1& a1, A2& a2, A3& a3, A4& a4, A5& a5, A6& a6, A7& a7)
-	{
-		return std::unique_ptr<T>(new T(a1, a2, a3, a4, a5, a6, a7), std::default_delete<T>());
-	}
-
-	template <typename T, typename A1, typename A2, typename A3, typename A4, typename A5, typename A6,
-		typename A7, typename A8>
-	inline std::unique_ptr<T> MakeUniquePtr(A1 const & a1, A2 const & a2, A3 const & a3, A4 const & a4,
-		A5 const & a5, A6 const & a6, A7 const & a7, A8 const & a8)
-	{
-		return std::unique_ptr<T>(new T(a1, a2, a3, a4, a5, a6, a7, a8), std::default_delete<T>());
-	}
-
-	template <typename T, typename A1, typename A2, typename A3, typename A4, typename A5, typename A6,
-		typename A7, typename A8>
-	inline std::unique_ptr<T> MakeUniquePtr(A1& a1, A2& a2, A3& a3, A4& a4, A5& a5, A6& a6, A7& a7,
-		A8& a8)
-	{
-		return std::unique_ptr<T>(new T(a1, a2, a3, a4, a5, a6, a7, a8), std::default_delete<T>());
-	}
-
-	template <typename T, typename A1, typename A2, typename A3, typename A4, typename A5, typename A6,
-		typename A7, typename A8, typename A9>
-	inline std::unique_ptr<T> MakeUniquePtr(A1 const & a1, A2 const & a2, A3 const & a3, A4 const & a4,
-		A5 const & a5, A6 const & a6, A7 const & a7, A8 const & a8, A9 const & a9)
-	{
-		return std::unique_ptr<T>(new T(a1, a2, a3, a4, a5, a6, a7, a8, a9), std::default_delete<T>());
-	}
-
-	template <typename T, typename A1, typename A2, typename A3, typename A4, typename A5, typename A6,
-		typename A7, typename A8, typename A9>
-	inline std::unique_ptr<T> MakeUniquePtr(A1& a1, A2& a2, A3& a3, A4& a4, A5& a5, A6& a6, A7& a7,
-		A8& a8, A9& a9)
-	{
-		return std::unique_ptr<T>(new T(a1, a2, a3, a4, a5, a6, a7, a8, a9), std::default_delete<T>());
-	}
-
-	template <typename T, typename A1, typename A2, typename A3, typename A4, typename A5, typename A6,
-		typename A7, typename A8, typename A9, typename A10>
-	inline std::unique_ptr<T> MakeUniquePtr(A1 const & a1, A2 const & a2, A3 const & a3, A4 const & a4,
-		A5 const & a5, A6 const & a6, A7 const & a7, A8 const & a8, A9 const & a9, A10 const & a10)
-	{
-		return std::unique_ptr<T>(new T(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10), std::default_delete<T>());
-	}
-
-	template <typename T, typename A1, typename A2, typename A3, typename A4, typename A5, typename A6,
-		typename A7, typename A8, typename A9, typename A10>
-	inline std::unique_ptr<T> MakeUniquePtr(A1& a1, A2& a2, A3& a3, A4& a4, A5& a5, A6& a6, A7& a7,
-		A8& a8, A9& a9, A10& a10)
-	{
-		return std::unique_ptr<T>(new T(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10), std::default_delete<T>());
-	}
-#endif
-
-	#define PRIME_NUM 0x9e3779b9
-
-#ifdef KLAYGE_CXX11_CORE_CONSTEXPR_SUPPORT
-#ifdef KLAYGE_COMPILER_MSVC
-#pragma warning(disable: 4307) // The hash here could cause integral constant overflow
-#endif
-
-	constexpr size_t _Hash(char const * str, size_t seed)
-	{
-		return 0 == *str ? seed : _Hash(str + 1, seed ^ (*str + PRIME_NUM + (seed << 6) + (seed >> 2)));
-	}
-
-#ifdef KLAYGE_COMPILER_MSVC
-	template <size_t N>
-	struct EnsureConst
-	{
-		static const size_t value = N;
-	};
-
-	#define CT_HASH(x) (EnsureConst<_Hash(x, 0)>::value)
-#else
-	#define CT_HASH(x) (_Hash(x, 0))
-#endif
-#else
-	#if defined(KLAYGE_COMPILER_MSVC)
-		#define FORCEINLINE __forceinline
-	#else
-		#define FORCEINLINE inline
-	#endif
-
-	FORCEINLINE size_t _Hash(const char (&str)[1])
-	{
-		return *str + PRIME_NUM;
-	}
-
-	template <size_t N>
-	FORCEINLINE size_t _Hash(const char (&str)[N])
-	{
-		typedef const char (&truncated_str)[N - 1];
-		size_t seed = _Hash((truncated_str)str);
-		return seed ^ (*(str + N - 1) + PRIME_NUM + (seed << 6) + (seed >> 2));
-	}
-
-	template <size_t N>
-	FORCEINLINE size_t CT_HASH(const char (&str)[N])
-	{
-		typedef const char (&truncated_str)[N - 1];
-		return _Hash((truncated_str)str);
-	}
-
-	#undef FORCEINLINE
-#endif
-
-	inline size_t RT_HASH(char const * str)
-	{
-		size_t seed = 0;
-		while (*str != 0)
-		{
-			seed ^= (*str + PRIME_NUM + (seed << 6) + (seed >> 2));
-			++ str;
-		}
-		return seed;
-	}
-
-#undef PRIME_NUM
 }
 
 #endif		// _KFL_UTIL_HPP

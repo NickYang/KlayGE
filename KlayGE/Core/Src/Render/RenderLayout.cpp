@@ -20,14 +20,6 @@
 
 namespace KlayGE
 {
-	class NullRenderLayout : public RenderLayout
-	{
-	public:
-		NullRenderLayout()
-		{
-		}
-	};
-
 	RenderLayout::RenderLayout()
 			: topo_type_(TT_PointList),
 				index_format_(EF_Unknown),
@@ -45,12 +37,6 @@ namespace KlayGE
 
 	RenderLayout::~RenderLayout()
 	{
-	}
-
-	RenderLayoutPtr RenderLayout::NullObject()
-	{
-		static RenderLayoutPtr obj = MakeSharedPtr<NullRenderLayout>();
-		return obj;
 	}
 
 	void RenderLayout::NumVertices(uint32_t n)
@@ -73,13 +59,13 @@ namespace KlayGE
 		return n;
 	}
 
-	void RenderLayout::BindVertexStream(GraphicsBufferPtr const & buffer, vertex_elements_type const & vet,
+	void RenderLayout::BindVertexStream(GraphicsBufferPtr const & buffer, std::span<VertexElement const> vet,
 		stream_type type, uint32_t freq)
 	{
 		BOOST_ASSERT(buffer);
 
 		uint32_t size = 0;
-		for (size_t i = 0; i < vet.size(); ++ i)
+		for (int i = 0; i < vet.size(); ++ i)
 		{
 			size += vet[i].element_size();
 		}
@@ -88,19 +74,21 @@ namespace KlayGE
 		{
 			for (size_t i = 0; i < vertex_streams_.size(); ++ i)
 			{
-				if (vertex_streams_[i].format == vet)
+				if (MakeSpan(vertex_streams_[i].format) == vet)
 				{
 					vertex_streams_[i].stream = buffer;
 					vertex_streams_[i].vertex_size = size;
 					vertex_streams_[i].type = type;
 					vertex_streams_[i].freq = freq;
+
+					streams_dirty_ = true;
 					return;
 				}
 			}
 
 			StreamUnit vs;
 			vs.stream = buffer;
-			vs.format = vet;
+			vs.format.assign(vet.begin(), vet.end());
 			vs.vertex_size = size;
 			vs.type = type;
 			vs.freq = freq;
@@ -109,7 +97,7 @@ namespace KlayGE
 		else
 		{
 			instance_stream_.stream = buffer;
-			instance_stream_.format = vet;
+			instance_stream_.format.assign(vet.begin(), vet.end());
 			instance_stream_.vertex_size = size;
 			instance_stream_.type = type;
 			instance_stream_.freq = freq;
@@ -253,41 +241,5 @@ namespace KlayGE
 	uint32_t RenderLayout::IndirectArgsOffset() const
 	{
 		return indirect_args_offset;
-	}
-
-	void RenderLayout::ExpandInstance(GraphicsBufferPtr& hint, uint32_t inst_no) const
-	{
-		BOOST_ASSERT(instance_stream_.stream);
-		BOOST_ASSERT(inst_no < this->NumInstances());
-
-		RenderFactory& rf = Context::Instance().RenderFactoryInstance();
-
-		uint32_t const num_vertices = this->NumVertices();
-		uint32_t const size_in_byte = instance_stream_.vertex_size * num_vertices;
-
-		if (!hint)
-		{
-			hint = rf.MakeVertexBuffer(BU_Dynamic, EAH_GPU_Read, size_in_byte, nullptr);
-		}
-
-		std::vector<uint8_t> instance_buffer(instance_stream_.stream->Size());
-		{
-			GraphicsBuffer::Mapper mapper(*instance_stream_.stream, BA_Read_Only);
-			std::copy(mapper.Pointer<uint8_t>(), mapper.Pointer<uint8_t>() + instance_stream_.stream->Size(),
-				instance_buffer.begin());
-		}
-
-		GraphicsBufferPtr hint_sys_mem = rf.MakeVertexBuffer(BU_Static, EAH_CPU_Write, size_in_byte, nullptr);
-		{
-			GraphicsBuffer::Mapper dst_mapper(*hint_sys_mem, BA_Write_Only);
-			for (uint32_t i = 0; i < num_vertices; ++ i)
-			{
-				std::copy(&instance_buffer[0] + inst_no * instance_stream_.vertex_size,
-					&instance_buffer[0] + (inst_no + 1) * instance_stream_.vertex_size,
-					dst_mapper.Pointer<uint8_t>() + i * instance_stream_.vertex_size);
-			}
-		}
-
-		hint_sys_mem->CopyToBuffer(*hint);
 	}
 }

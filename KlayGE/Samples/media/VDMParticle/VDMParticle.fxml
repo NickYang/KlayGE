@@ -1,0 +1,112 @@
+<?xml version='1.0'?>
+
+<effect>
+	<include name="util.fxml"/>
+	<include name="Lighting.fxml"/>
+	<include name="Quaternion.fxml"/>
+	<include name="Material.fxml"/>
+	<include name="Mesh.fxml"/>
+	<include name="ModelCamera.fxml"/>
+
+	<cbuffer name="per_frame">
+		<parameter type="float3" name="light_pos"/>
+		<parameter type="float4" name="light_color"/>
+		<parameter type="float3" name="light_falloff"/>
+	</cbuffer>
+
+	<parameter type="sampler" name="aniso_sampler">
+		<state name="filtering" value="anisotropic"/>
+		<state name="address_u" value="wrap"/>
+		<state name="address_v" value="wrap"/>
+		<state name="max_anisotropy" value="8"/>
+	</parameter>
+
+	<shader>
+		<![CDATA[
+void MeshVS(uint instance_id : SV_InstanceID,
+					float4 position : POSITION,
+					float2 texcoord : TEXCOORD0,
+					float4 tangent_quat : TANGENT,
+					out float4 oL : TEXCOORD0,
+					out float4 oH : TEXCOORD1,
+					out float4 oPos : SV_Position)
+{
+	position = float4(position.xyz * pos_extent + pos_center, 1);
+	texcoord = texcoord * tc_extent + tc_center;
+	tangent_quat = tangent_quat * 2 - 1;
+
+	KlayGECameraInfo camera = CameraFromInstance(instance_id);
+	float4x4 mvp = camera.mvp;
+	float3 eye_pos = camera.eye_pos;
+
+	oPos = mul(position, mvp);
+	float4 pos_world = mul(position, model);
+
+	float3x3 world_to_tangent;
+	world_to_tangent[0] = normalize(mul(transform_quat(float3(1, 0, 0), tangent_quat), (float3x3)model));
+	world_to_tangent[1] = normalize(mul(transform_quat(float3(0, 1, 0), tangent_quat) * sign(tangent_quat.w), (float3x3)model));
+	world_to_tangent[2] = normalize(mul(transform_quat(float3(0, 0, 1), tangent_quat), (float3x3)model));
+
+	float3 light_vec = light_pos - pos_world.xyz;
+	float3 view_vec = eye_pos - pos_world.xyz;
+	float3 half_vec = normalize(light_vec) + normalize(view_vec);
+
+	oL.xyz = mul(world_to_tangent, light_vec);
+	oH.xyz = mul(world_to_tangent, half_vec);
+
+	oL.w = texcoord.x;
+	oH.w = texcoord.y;
+}
+
+float4 MeshPS(float4 L : TEXCOORD0, float4 H : TEXCOORD1) : SV_Target 
+{
+	float2 uv = float2(L.w, H.w);
+
+	float3 albedo = albedo_clr.rgb;
+	if (albedo_map_enabled)
+	{
+		albedo *= albedo_tex.Sample(aniso_sampler, uv).rgb;
+	}
+	float metalness = metalness_glossiness_factor.x;
+	float glossiness = metalness_glossiness_factor.y;
+	if (metalness_glossiness_factor.z > 0.5f)
+	{
+		float2 mg_tex = get_xy_channel(metalness_glossiness_tex.Sample(aniso_sampler, uv));
+		metalness *= mg_tex.x;
+		glossiness *= mg_tex.y;
+	}
+	float shininess = Glossiness2Shininess(glossiness);
+	float3 emissive = emissive_clr.xyz;
+	if (emissive_clr.w > 0.5f)
+	{
+		emissive *= emissive_tex.Sample(aniso_sampler, uv).xyz;
+	}
+	float3 normal;
+	if (normal_map_enabled)
+	{
+		normal = decompress_normal(normal_tex.Sample(aniso_sampler, uv));
+	}
+	else
+	{
+		normal = float3(0, 0, 1);
+	}
+
+	float3 c_diff = DiffuseColor(albedo, metalness);
+	float3 c_spec = SpecularColor(albedo, metalness);
+
+	float3 light_vec = normalize(L.xyz);
+	float3 halfway = normalize(H.xyz);
+	
+	float atten = AttenuationTerm(0, -L.xyz, light_falloff);
+	return float4(0.2f * c_diff + atten * light_color.xyz * CalcBRDFShading(c_diff, c_spec, shininess, light_vec, halfway, normal), 1);
+}
+		]]>
+	</shader>
+
+	<technique name="Mesh">
+		<pass name="p0">
+			<state name="vertex_shader" value="MeshVS()"/>
+			<state name="pixel_shader" value="MeshPS()"/>
+		</pass>
+	</technique>
+</effect>

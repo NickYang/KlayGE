@@ -22,15 +22,26 @@
                     <RibbonButton LargeImageSource="Images\SaveAs.png" x:Name="save_as" Label="Save as" Click="SaveAsClick"/>
                 </RibbonGroup>
                 <RibbonGroup>
+                    <RibbonButton LargeImageSource="Images\AssignMaterial.png" x:Name="assign_mtl" Label="Assign Material" Click="AssignMaterialClick"/>
+                    <RibbonButton LargeImageSource="Images\CopyMaterial.png" x:Name="copy_mtl" Label="Copy Material" Click="CopyMaterialClick"/>
+                    <RibbonButton LargeImageSource="Images\DeleteMaterial.png" x:Name="delete_mtl" Label="Delete Material" Click="DeleteMaterialClick"/>
+                    <RibbonButton LargeImageSource="Images\ImportMaterial.png" x:Name="import_mtl" Label="Import Material" Click="ImportMaterialClick"/>
+                    <RibbonButton LargeImageSource="Images\ExportMaterial.png" x:Name="export_mtl" Label="Export Material" Click="ExportMaterialClick"/>
+                </RibbonGroup>
+                <RibbonGroup>
                     <RibbonButton LargeImageSource="Images\Undo.png" x:Name="undo" Label="Undo" Click="UndoClick"/>
                     <RibbonButton LargeImageSource="Images\Redo.png" x:Name="redo" Label="Redo" Click="RedoClick"/>
                 </RibbonGroup>
                 <RibbonGroup>
-                    <RibbonToggleButton LargeImageSource="Images\Skinning.png" x:Name="skinning" Label="Skinning" Checked="SkinningChecked" Unchecked="SkinningUnchecked"/>
-                    <RibbonToggleButton LargeImageSource="Images\Play.png" x:Name="play" Label="Play Animation"/>
+                    <RibbonToggleButton LargeImageSource="Images\Skinning.png" x:Name="skinning" Label="Skinning" IsChecked="{Binding SkinningValue}"/>
+                    <RibbonToggleButton LargeImageSource="Images\Skeleton.png" x:Name="skeleton" Label="Skeleton" IsChecked="{Binding SkeletonValue}"/>
+                    <RibbonToggleButton LargeImageSource="Images\Play.png" x:Name="play" Label="Play Animation" IsChecked="{Binding PlayValue}"/>
                 </RibbonGroup>
                 <RibbonGroup>
-                    <RibbonToggleButton LargeImageSource="Images\Camera.png" x:Name="fps_camera" Label="FPS Camera" Checked="FPSCameraChecked" Unchecked="FPSCameraUnchecked"/>
+                    <RibbonToggleButton LargeImageSource="Images\Light.png" x:Name="light" Label="Light" IsChecked="{Binding LightValue}"/>
+                    <RibbonToggleButton LargeImageSource="Images\Camera.png" x:Name="fps_camera" Label="FPS Camera" IsChecked="{Binding FPSCameraValue}"/>
+                    <RibbonToggleButton LargeImageSource="Images\LineMode.png" x:Name="line_mode" Label="Line Mode" IsChecked="{Binding LineModeValue}"/>
+                    <RibbonToggleButton LargeImageSource="Images\ImposterMode.png" x:Name="imposter_mode" Label="Imposter Mode" IsChecked="{Binding ImposterModeValue}"/>
                 </RibbonGroup>
                 <RibbonGroup>
                     <Grid>
@@ -38,31 +49,44 @@
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
-                        <RibbonComboBox Name="visualize" Label="Visualize" Margin="0,10,0,0" Grid.Row="0">
-                            <RibbonGallery Name="visualize_gallery" SelectedValue="Lighting" SelectedValuePath="Content" MaxColumnCount="1" SelectionChanged="VisualizeSelectionChanged">
-                                <RibbonGalleryCategory>
-                                    <RibbonGalleryItem Content="Lighting" DataContext="0"/>
-                                    <RibbonGalleryItem Content="Vertex Position" DataContext="1"/>
-                                    <RibbonGalleryItem Content="Vertex Normal" DataContext="2"/>
-                                    <RibbonGalleryItem Content="Vertex Diffuse" DataContext="3"/>
-                                    <RibbonGalleryItem Content="Vertex Specular" DataContext="4"/>
-                                    <RibbonGalleryItem Content="Vertex Bone Weight" DataContext="5"/>
-                                    <RibbonGalleryItem Content="Vertex Bone Indices" DataContext="6"/>
-                                    <RibbonGalleryItem Content="Vertex Texcoord" DataContext="7"/>
-                                    <RibbonGalleryItem Content="Vertex Tangent" DataContext="8"/>
-                                    <RibbonGalleryItem Content="Vertex Binormal" DataContext="9"/>
-                                    <RibbonGalleryItem Content="Texture Diffuse" DataContext="10"/>
-                                    <RibbonGalleryItem Content="Texture Specular" DataContext="11"/>
-                                    <RibbonGalleryItem Content="Texture Shininess" DataContext="12"/>
-                                    <RibbonGalleryItem Content="Texture Normal" DataContext="13"/>
-                                    <RibbonGalleryItem Content="Texture Height" DataContext="14"/>
-                                    <RibbonGalleryItem Content="Texture Emit" DataContext="15"/>
-                                    <RibbonGalleryItem Content="Texture Opacity" DataContext="16"/>
-                                </RibbonGalleryCategory>
-                            </RibbonGallery>
-                        </RibbonComboBox>
+                        <Grid Grid.Row="0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <RibbonComboBox Name="visualize" Label="Visualize" Margin="0,10,0,0" Grid.Column="0">
+                                <RibbonGallery Name="visualize_gallery" SelectedValue="Lighting" SelectedValuePath="Content" MaxColumnCount="1" SelectionChanged="VisualizeSelectionChanged">
+                                    <RibbonGalleryCategory>
+                                        <RibbonGalleryItem Content="Lighting" DataContext="0"/>
+                                        <RibbonGalleryItem Content="Vertex Position" DataContext="1"/>
+                                        <RibbonGalleryItem Content="Vertex Normal" DataContext="2"/>
+                                        <RibbonGalleryItem Content="Vertex Diffuse" DataContext="3"/>
+                                        <RibbonGalleryItem Content="Vertex Specular" DataContext="4"/>
+                                        <RibbonGalleryItem Content="Vertex Bone Weight" DataContext="5"/>
+                                        <RibbonGalleryItem Content="Vertex Bone Indices" DataContext="6"/>
+                                        <RibbonGalleryItem Content="Vertex Texcoord" DataContext="7"/>
+                                        <RibbonGalleryItem Content="Vertex Tangent" DataContext="8"/>
+                                        <RibbonGalleryItem Content="Vertex Binormal" DataContext="9"/>
+                                        <RibbonGalleryItem Content="Texture Albedo" DataContext="10"/>
+                                        <RibbonGalleryItem Content="Texture Metalness" DataContext="11"/>
+                                        <RibbonGalleryItem Content="Texture Glossiness" DataContext="12"/>
+                                        <RibbonGalleryItem Content="Texture Emissive" DataContext="13"/>
+                                        <RibbonGalleryItem Content="Texture Opacity" DataContext="14"/>
+                                        <RibbonGalleryItem Content="Texture Normal" DataContext="15"/>
+                                        <RibbonGalleryItem Content="Texture Height" DataContext="16"/>
+                                    </RibbonGalleryCategory>
+                                </RibbonGallery>
+                            </RibbonComboBox>
+
+                            <RibbonComboBox Name="lod" Label="LoD" Margin="0,10,0,0" Grid.Column="1">
+                                <RibbonGallery Name="lod_gallery" SelectedValue="0" SelectedValuePath="Content" MaxColumnCount="1" SelectionChanged="LodSelectionChanged">
+                                    <RibbonGalleryCategory x:Name="lods_items"/>
+                                </RibbonGallery>
+                            </RibbonComboBox>
+                        </Grid>
+
                         <Label Name="frame_text" Content="Frame 0" HorizontalAlignment="Left" Margin="0,7,0,0" VerticalAlignment="Top" Grid.Row="1"/>
-                        <Slider Name="frame_slider" Margin="60,10,0,0" Width="700" Grid.Row="1" ValueChanged="FrameSliderValueChanged"/>
+                        <Slider Name="frame_slider" Margin="60,10,0,0" Width="700" Grid.Row="1" Value="{Binding FrameSliderValue}"/>
                     </Grid>
                 </RibbonGroup>
             </RibbonTab>
@@ -75,10 +99,57 @@
                               BorderThickness="1">
                 <xcad:LayoutRoot x:Name="_layoutRoot">
                     <xcad:LayoutPanel Orientation="Horizontal">
+                        <xcad:LayoutAnchorablePane DockWidth="300">
+                            <xcad:LayoutAnchorable ContentId="Meshes" Title="Meshes" CanHide="True" CanClose="False" AutoHideWidth="300">
+                                <TreeView ItemsSource="{Binding ModelRoot}">
+                                    <TreeView.ItemContainerStyle>
+                                        <Style TargetType="{x:Type TreeViewItem}">
+                                            <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
+                                            <Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}" />
+                                            <Setter Property="FontWeight" Value="Normal" />
+                                            <Style.Triggers>
+                                                <Trigger Property="IsSelected" Value="True">
+                                                    <Setter Property="FontWeight" Value="Bold" />
+                                                </Trigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TreeView.ItemContainerStyle>
+
+                                    <TreeView.ItemTemplate>
+                                        <HierarchicalDataTemplate ItemsSource="{Binding Children}">
+                                            <TextBlock Text="{Binding Name}" />
+                                        </HierarchicalDataTemplate>
+                                    </TreeView.ItemTemplate>
+                                </TreeView>
+                            </xcad:LayoutAnchorable>
+                            <xcad:LayoutAnchorable ContentId="Materials" Title="Materials" CanHide="True" CanClose="False" AutoHideWidth="300">
+                                <TreeView ItemsSource="{Binding MaterialRoot}">
+                                    <TreeView.ItemContainerStyle>
+                                        <Style TargetType="{x:Type TreeViewItem}">
+                                            <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
+                                            <Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}" />
+                                            <Setter Property="FontWeight" Value="Normal" />
+                                            <Style.Triggers>
+                                                <Trigger Property="IsSelected" Value="True">
+                                                    <Setter Property="FontWeight" Value="Bold" />
+                                                </Trigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TreeView.ItemContainerStyle>
+
+                                    <TreeView.ItemTemplate>
+                                        <HierarchicalDataTemplate ItemsSource="{Binding Children}">
+                                            <TextBlock Text="{Binding Name}" />
+                                        </HierarchicalDataTemplate>
+                                    </TreeView.ItemTemplate>
+                                </TreeView>
+                            </xcad:LayoutAnchorable>
+                        </xcad:LayoutAnchorablePane>
+
                         <xcad:LayoutDocumentPane>
                             <xcad:LayoutDocument ContentId="document1" x:Name="doc1"
                                             Title="Editor" CanClose="False">
-                                <Label Name="editor_bg" SizeChanged="EditorWindowSizeChanged" Padding="0">
+                                <Label Name="editor_bg" SizeChanged="EditorWindowSizeChanged" Padding="0" AllowDrop="True" DragEnter="EditorBGDragEnter" Drop="EditorBGDrop">
                                     <WindowsFormsHost Name="editor_frame">
                                         <wf:Panel x:Name="editor_wnd" MouseDown="EditorMouseDown" MouseUp="EditorMouseUp" MouseMove="EditorMouseMove" KeyPress="EditorKeyPress"/>
                                     </WindowsFormsHost>

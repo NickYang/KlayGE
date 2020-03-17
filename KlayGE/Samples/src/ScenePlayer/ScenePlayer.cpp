@@ -1,10 +1,9 @@
 #include <KlayGE/KlayGE.hpp>
-#include <KFL/ThrowErr.hpp>
+#include <KFL/CustomizedStreamBuf.hpp>
 #include <KFL/Util.hpp>
 #include <KFL/Math.hpp>
 #include <KlayGE/Font.hpp>
 #include <KlayGE/Renderable.hpp>
-#include <KlayGE/RenderableHelper.hpp>
 #include <KlayGE/RenderEngine.hpp>
 #include <KlayGE/RenderEffect.hpp>
 #include <KlayGE/FrameBuffer.hpp>
@@ -14,7 +13,8 @@
 #include <KlayGE/RenderSettings.hpp>
 #include <KlayGE/Mesh.hpp>
 #include <KlayGE/GraphicsBuffer.hpp>
-#include <KlayGE/SceneObjectHelper.hpp>
+#include <KlayGE/SceneNode.hpp>
+#include <KlayGE/SkyBox.hpp>
 #include <KlayGE/UI.hpp>
 #include <KlayGE/Camera.hpp>
 #include <KlayGE/DeferredRenderingLayer.hpp>
@@ -25,10 +25,11 @@
 #include <KlayGE/InputFactory.hpp>
 #include <KlayGE/ScriptFactory.hpp>
 
-#include <vector>
-#include <sstream>
 #include <fstream>
-#include <boost/lexical_cast.hpp>
+#include <iterator>
+#include <sstream>
+#include <vector>
+
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/trim.hpp>
 
@@ -49,18 +50,19 @@ namespace
 			module_ = scriptEngine.CreateModule("");
 			module_->RunString("from ScenePlayer import *");
 
-			script_ = MakeSharedPtr<std::string>(script);
+			script_ = MakeSharedPtr<std::string>();
+			*script_ = boost::algorithm::trim_copy(script);
 		}
 
 		virtual ~PyScriptUpdate()
 		{
 		}
 
-		boost::any Run(float app_time, float elapsed_time)
+		std::any Run(float app_time, float elapsed_time)
 		{
 			module_->RunString(*script_);
 
-			return module_->Call("update", std::make_tuple(app_time, elapsed_time));
+			return module_->Call("update", MakeSpan<std::any>({app_time, elapsed_time}));
 		}
 
 	private:
@@ -68,51 +70,53 @@ namespace
 		std::shared_ptr<std::string> script_;
 	};
 
-	class LightSourceUpdate : public PyScriptUpdate
+	class LightSourceNodeUpdate : public PyScriptUpdate
 	{
 	public:
-		explicit LightSourceUpdate(std::string const & script)
+		explicit LightSourceNodeUpdate(std::string const & script)
 			: PyScriptUpdate(script)
 		{
 		}
 
-		void operator()(LightSource& light, float app_time, float elapsed_time)
+		void operator()(SceneComponent& component, float app_time, float elapsed_time)
 		{
-			boost::any py_ret = this->Run(app_time, elapsed_time);
-			if (boost::any_cast<std::vector<boost::any>>(&py_ret) != nullptr)
+			LightSource& light = checked_cast<LightSource&>(component);
+
+			std::any py_ret = this->Run(app_time, elapsed_time);
+			if (std::any_cast<std::vector<std::any>>(&py_ret) != nullptr)
 			{
-				std::vector<boost::any> ret = boost::any_cast<std::vector<boost::any>>(py_ret);
+				std::vector<std::any> ret = std::any_cast<std::vector<std::any>>(py_ret);
 				size_t s = ret.size();
 
 				if (s > 0)
 				{
-					boost::any py_mat = ret[0];
-					if (boost::any_cast<std::vector<boost::any>>(&py_mat) != nullptr)
+					std::any py_mat = ret[0];
+					if (std::any_cast<std::vector<std::any>>(&py_mat) != nullptr)
 					{
-						std::vector<boost::any> mat = boost::any_cast<std::vector<boost::any>>(py_mat);
+						std::vector<std::any> mat = std::any_cast<std::vector<std::any>>(py_mat);
 						if (!mat.empty())
 						{
 							float4x4 light_mat;
 							for (int i = 0; i < 16; ++ i)
 							{
-								light_mat[i] = boost::any_cast<float>(mat[i]);
+								light_mat[i] = std::any_cast<float>(mat[i]);
 							}
-							light.ModelMatrix(light_mat);
+							light.BoundSceneNode()->TransformToParent(light_mat);
 						}
 					}
 				}
 				if (s > 1)
 				{
-					boost::any py_clr = ret[1];
-					if (boost::any_cast<std::vector<boost::any>>(&py_clr) != nullptr)
+					std::any py_clr = ret[1];
+					if (std::any_cast<std::vector<std::any>>(&py_clr) != nullptr)
 					{
-						std::vector<boost::any> clr = boost::any_cast<std::vector<boost::any>>(py_clr);
+						std::vector<std::any> clr = std::any_cast<std::vector<std::any>>(py_clr);
 						if (!clr.empty())
 						{
 							float3 light_clr;
 							for (int i = 0; i < 3; ++ i)
 							{
-								light_clr[i] = boost::any_cast<float>(clr[i]);
+								light_clr[i] = std::any_cast<float>(clr[i]);
 							}
 							light.Color(light_clr);
 						}
@@ -120,16 +124,16 @@ namespace
 				}				
 				if (s > 2)
 				{
-					boost::any py_fo = ret[2];
-					if (boost::any_cast<std::vector<boost::any>>(&py_fo) != nullptr)
+					std::any py_fo = ret[2];
+					if (std::any_cast<std::vector<std::any>>(&py_fo) != nullptr)
 					{
-						std::vector<boost::any> fo = boost::any_cast<std::vector<boost::any>>(py_fo);
+						std::vector<std::any> fo = std::any_cast<std::vector<std::any>>(py_fo);
 						if (!fo.empty())
 						{
 							float3 light_fall_off;
 							for (int i = 0; i < 3; ++ i)
 							{
-								light_fall_off[i] = boost::any_cast<float>(fo[i]);
+								light_fall_off[i] = std::any_cast<float>(fo[i]);
 							}
 							light.Falloff(light_fall_off);
 						}
@@ -137,16 +141,16 @@ namespace
 				}
 				if (s > 3)
 				{
-					boost::any py_oi = ret[3];
-					if (boost::any_cast<std::vector<boost::any>>(&py_oi) != nullptr)
+					std::any py_oi = ret[3];
+					if (std::any_cast<std::vector<std::any>>(&py_oi) != nullptr)
 					{
-						std::vector<boost::any> oi = boost::any_cast<std::vector<boost::any>>(py_oi);
+						std::vector<std::any> oi = std::any_cast<std::vector<std::any>>(py_oi);
 						if (!oi.empty())
 						{
 							float2 light_outer_inner;
 							for (int i = 0; i < 2; ++ i)
 							{
-								light_outer_inner[i] = boost::any_cast<float>(oi[i]);
+								light_outer_inner[i] = std::any_cast<float>(oi[i]);
 							}
 							light.OuterAngle(light_outer_inner.x());
 							light.InnerAngle(light_outer_inner.y());
@@ -157,36 +161,36 @@ namespace
 		}
 	};
 
-	class SceneObjectUpdate : public PyScriptUpdate
+	class SceneNodeUpdate : public PyScriptUpdate
 	{
 	public:
-		explicit SceneObjectUpdate(std::string const & script)
+		explicit SceneNodeUpdate(std::string const & script)
 			: PyScriptUpdate(script)
 		{
 		}
 
-		void operator()(SceneObject& obj, float app_time, float elapsed_time)
+		void operator()(SceneNode& node, float app_time, float elapsed_time)
 		{
-			boost::any py_ret = this->Run(app_time, elapsed_time);
-			if (boost::any_cast<std::vector<boost::any>>(&py_ret) != nullptr)
+			std::any py_ret = this->Run(app_time, elapsed_time);
+			if (std::any_cast<std::vector<std::any>>(&py_ret) != nullptr)
 			{
-				std::vector<boost::any> ret = boost::any_cast<std::vector<boost::any>>(py_ret);
+				std::vector<std::any> ret = std::any_cast<std::vector<std::any>>(py_ret);
 				size_t s = ret.size();
 
 				if (s > 0)
 				{
-					boost::any py_mat = ret[0];
-					if (boost::any_cast<std::vector<boost::any>>(&py_mat) != nullptr)
+					std::any py_mat = ret[0];
+					if (std::any_cast<std::vector<std::any>>(&py_mat) != nullptr)
 					{
-						std::vector<boost::any> mat = boost::any_cast<std::vector<boost::any>>(py_mat);
+						std::vector<std::any> mat = std::any_cast<std::vector<std::any>>(py_mat);
 						if (!mat.empty())
 						{
 							float4x4 obj_mat;
 							for (int i = 0; i < 16; ++ i)
 							{
-								obj_mat[i] = boost::any_cast<float>(mat[i]);
+								obj_mat[i] = std::any_cast<float>(mat[i]);
 							}
-							obj.ModelMatrix(obj_mat);
+							node.TransformToParent(obj_mat);
 						}
 					}
 				}
@@ -202,12 +206,14 @@ namespace
 		{
 		}
 
-		void operator()(Camera& camera, float app_time, float elapsed_time)
+		void operator()(SceneComponent& component, float app_time, float elapsed_time)
 		{
-			boost::any py_ret = this->Run(app_time, elapsed_time);
-			if (boost::any_cast<std::vector<boost::any>>(&py_ret) != nullptr)
+			Camera& camera = checked_cast<Camera&>(component);
+
+			std::any py_ret = this->Run(app_time, elapsed_time);
+			if (std::any_cast<std::vector<std::any>>(&py_ret) != nullptr)
 			{
-				std::vector<boost::any> ret = boost::any_cast<std::vector<boost::any>>(py_ret);
+				std::vector<std::any> ret = std::any_cast<std::vector<std::any>>(py_ret);
 				size_t s = ret.size();
 
 				float3 cam_eye = camera.EyePos();
@@ -220,67 +226,68 @@ namespace
 				
 				if (s > 0)
 				{
-					boost::any py_eye = ret[0];
-					if (boost::any_cast<std::vector<boost::any>>(&py_eye) != nullptr)
+					std::any py_eye = ret[0];
+					if (std::any_cast<std::vector<std::any>>(&py_eye) != nullptr)
 					{
-						std::vector<boost::any> eye = boost::any_cast<std::vector<boost::any>>(py_eye);
+						std::vector<std::any> eye = std::any_cast<std::vector<std::any>>(py_eye);
 						if (!eye.empty())
 						{
 							for (int i = 0; i < 3; ++ i)
 							{
-								cam_eye[i] = boost::any_cast<float>(eye[i]);
+								cam_eye[i] = std::any_cast<float>(eye[i]);
 							}
 						}
 					}
 				}
 				if (s > 1)
 				{
-					boost::any py_lookat = ret[1];
-					if (boost::any_cast<std::vector<boost::any>>(&py_lookat) != nullptr)
+					std::any py_lookat = ret[1];
+					if (std::any_cast<std::vector<std::any>>(&py_lookat) != nullptr)
 					{
-						std::vector<boost::any> lookat = boost::any_cast<std::vector<boost::any>>(py_lookat);
+						std::vector<std::any> lookat = std::any_cast<std::vector<std::any>>(py_lookat);
 						if (!lookat.empty())
 						{
 							for (int i = 0; i < 3; ++ i)
 							{
-								cam_lookat[i] = boost::any_cast<float>(lookat[i]);
+								cam_lookat[i] = std::any_cast<float>(lookat[i]);
 							}
 						}
 					}
 				}
 				if (s > 2)
 				{
-					boost::any py_up = ret[2];
-					if (boost::any_cast<std::vector<boost::any>>(&py_up) != nullptr)
+					std::any py_up = ret[2];
+					if (std::any_cast<std::vector<std::any>>(&py_up) != nullptr)
 					{
-						std::vector<boost::any> up = boost::any_cast<std::vector<boost::any>>(py_up);
+						std::vector<std::any> up = std::any_cast<std::vector<std::any>>(py_up);
 						if (!up.empty())
 						{
 							for (int i = 0; i < 3; ++ i)
 							{
-								cam_up[i] = boost::any_cast<float>(up[i]);
+								cam_up[i] = std::any_cast<float>(up[i]);
 							}
 						}
 					}
 				}
 				if (s > 3)
 				{
-					boost::any py_np = ret[3];
-					if (boost::any_cast<float>(&py_np) != nullptr)
+					std::any py_np = ret[3];
+					if (std::any_cast<float>(&py_np) != nullptr)
 					{
-						cam_np = boost::any_cast<float>(py_np);
+						cam_np = std::any_cast<float>(py_np);
 					}
 				}
 				if (s > 4)
 				{
-					boost::any py_fp = ret[3];
-					if (boost::any_cast<float>(&py_fp) != nullptr)
+					std::any py_fp = ret[3];
+					if (std::any_cast<float>(&py_fp) != nullptr)
 					{
-						cam_fp = boost::any_cast<float>(py_fp);
+						cam_fp = std::any_cast<float>(py_fp);
 					}
 				}
 
-				camera.ViewParams(cam_eye, cam_lookat, cam_up);
+				camera.LookAtDist(MathLib::length(cam_lookat - cam_eye));
+				camera.BoundSceneNode()->TransformToWorld(MathLib::inverse(MathLib::look_at_lh(cam_eye, cam_lookat, cam_up)));
 				camera.ProjParams(cam_fov, cam_aspect, cam_np, cam_fp);
 			}
 		}
@@ -300,7 +307,6 @@ namespace
 int SampleMain()
 {
 	ContextCfg cfg = Context::Instance().Config();
-	cfg.script_factory_name = "Python";
 	cfg.deferred_rendering = true;
 	cfg.graphics_cfg.fft_lens_effects = true;
 	Context::Instance().Config(cfg);
@@ -319,121 +325,206 @@ ScenePlayerApp::ScenePlayerApp()
 	ResLoader::Instance().AddPath("../../Samples/media/ScenePlayer");
 }
 
-bool ScenePlayerApp::ConfirmDevice() const
-{
-	return true;
-}
-
 void ScenePlayerApp::LoadScene(std::string const & name)
 {
 	Context& context = Context::Instance();
 	SceneManager& sceneMgr(context.SceneManagerInstance());
-	sceneMgr.ClearLight();
 	sceneMgr.ClearObject();
 
 	RenderFactory& rf = context.RenderFactoryInstance();
 
 	scene_models_.clear();
 	scene_objs_.clear();
-	sky_box_.reset();
+	skybox_.reset();
 
 	lights_.clear();
-	light_proxies_.clear();
 
 	ResIdentifierPtr ifs = ResLoader::Instance().Open(name.c_str());
 
 	KlayGE::XMLDocument doc;
-	XMLNodePtr root = doc.Parse(ifs);
+	XMLNodePtr root = doc.Parse(*ifs);
+
+	{
+		XMLAttributePtr attr = root->Attrib("skybox");
+		if (attr)
+		{
+			auto skybox_renderable = MakeSharedPtr<RenderableSkyBox>();
+			skybox_ = MakeSharedPtr<SceneNode>(MakeSharedPtr<RenderableComponent>(skybox_renderable), SceneNode::SOA_NotCastShadow);
+
+			std::string const skybox_name = std::string(attr->ValueString());
+			if (!ResLoader::Instance().Locate(skybox_name).empty())
+			{
+				skybox_renderable->CubeMap(ASyncLoadTexture(skybox_name, EAH_GPU_Read | EAH_Immutable));
+			}
+			else if (!ResLoader::Instance().Locate(skybox_name + ".dds").empty())
+			{
+				skybox_renderable->CubeMap(ASyncLoadTexture(skybox_name + ".dds", EAH_GPU_Read | EAH_Immutable));
+			}
+			else if (!ResLoader::Instance().Locate(skybox_name + "_y.dds").empty())
+			{
+				skybox_renderable->CompressedCubeMap(ASyncLoadTexture(skybox_name + "_y.dds", EAH_GPU_Read | EAH_Immutable),
+					ASyncLoadTexture(skybox_name + "_c.dds", EAH_GPU_Read | EAH_Immutable));
+			}
+			else
+			{
+				Color color(0, 0, 0, 1);
+				MemInputStreamBuf stream_buff(skybox_name.data(), skybox_name.size());
+				std::istream(&stream_buff) >> color.r() >> color.g() >> color.b();
+
+				auto const fmt = rf.RenderEngineInstance().DeviceCaps().BestMatchTextureFormat(MakeSpan({EF_ABGR8, EF_ARGB8}));
+				BOOST_ASSERT(fmt != EF_Unknown);
+				uint32_t texel = (fmt == EF_ABGR8) ? color.ABGR() : color.ARGB();
+				ElementInitData init_data[6];
+				for (int i = 0; i < 6; ++ i)
+				{
+					init_data[i].data = &texel;
+					init_data[i].row_pitch = sizeof(uint32_t);
+					init_data[i].slice_pitch = init_data[i].row_pitch;
+				}
+
+				skybox_renderable->CubeMap(rf.MakeTextureCube(1, 1, 1, fmt, 1, 0, EAH_GPU_Read | EAH_Immutable, MakeSpan(init_data)));
+			}
+
+			Context::Instance().SceneManagerInstance().SceneRootNode().AddChild(skybox_);
+		}
+	}
 
 	for (XMLNodePtr light_node = root->FirstNode("light"); light_node; light_node = light_node->NextSibling("light"))
 	{
 		LightSourcePtr light;
+		SceneNodePtr scene_node = MakeSharedPtr<SceneNode>(SceneNode::SOA_Cullable | SceneNode::SOA_Moveable);
+
+		std::string_view const lt_str = light_node->Attrib("type")->ValueString();
+		if ("ambient" == lt_str)
+		{
+			light = MakeSharedPtr<AmbientLightSource>();
+		}
+		else if ("directional" == lt_str)
+		{
+			light = MakeSharedPtr<DirectionalLightSource>();
+		}
+		else if ("point" == lt_str)
+		{
+			light = MakeSharedPtr<PointLightSource>();
+		}
+		else if ("spot" == lt_str)
+		{
+			light = MakeSharedPtr<SpotLightSource>();
+		}
+		else if ("sphere_area" == lt_str)
+		{
+			light = MakeSharedPtr<SphereAreaLightSource>();
+		}
+		else
+		{
+			BOOST_ASSERT("tube_area" == lt_str);
+			light = MakeSharedPtr<TubeAreaLightSource>();
+		}
 
 		uint32_t light_attr = 0;
-		float3 light_clr(0, 0, 0);
-		float3 fall_off(1, 0, 0);
-		std::string update_script;
-		TexturePtr projective;
-
-		XMLNodePtr attribute_node = light_node->FirstNode("attribute");
-		if (attribute_node)
+		XMLNodePtr attr_node = light_node->FirstNode("attr");
+		if (attr_node)
 		{
-			XMLAttributePtr attr = attribute_node->Attrib("value");
-			if (attr)
+			std::string_view const attr_str = attr_node->Attrib("value")->ValueString();
+			std::vector<std::string> tokens;
+			boost::algorithm::split(tokens, attr_str, boost::is_any_of(" \t|"));
+			for (auto& token : tokens)
 			{
-				if (!attr->TryConvert(light_attr))
-				{
-					light_attr = 0;
+				boost::algorithm::trim(token);
 
-					std::vector<std::string> tokens;
-					boost::algorithm::split(tokens, attr->ValueString(), boost::is_any_of(" \t|"));
-					for (auto& token : tokens)
-					{
-						boost::algorithm::trim(token);
-						if ("noshadow" == token)
-						{
-							light_attr |= LightSource::LSA_NoShadow;
-						}
-						else if ("nodiffuse" == token)
-						{
-							light_attr |= LightSource::LSA_NoDiffuse;
-						}
-						else if ("nospecular" == token)
-						{
-							light_attr |= LightSource::LSA_NoSpecular;
-						}
-						else if ("indirect" == token)
-						{
-							light_attr |= LightSource::LSA_IndirectLighting;
-						}
-					}
+				if ("no_shadow" == token)
+				{
+					light_attr |= LightSource::LSA_NoShadow;
+				}
+				else if ("no_diffuse" == token)
+				{
+					light_attr |= LightSource::LSA_NoDiffuse;
+				}
+				else if ("no_specular" == token)
+				{
+					light_attr |= LightSource::LSA_NoSpecular;
+				}
+				else if ("indirect" == token)
+				{
+					light_attr |= LightSource::LSA_IndirectLighting;
 				}
 			}
 		}
+		light->Attrib(light_attr);
 
 		XMLNodePtr color_node = light_node->FirstNode("color");
 		if (color_node)
 		{
-			XMLAttributePtr attr = color_node->Attrib("x");
-			if (attr)
-			{
-				light_clr.x() = attr->ValueFloat();
-			}
-
-			attr = color_node->Attrib("y");
-			if (attr)
-			{
-				light_clr.y() = attr->ValueFloat();
-			}
-
-			attr = color_node->Attrib("z");
-			if (attr)
-			{
-				light_clr.z() = attr->ValueFloat();
-			}
+			float3 color;
+			auto v = color_node->Attrib("v")->ValueString();
+			MemInputStreamBuf stream_buff(v.data(), v.size());
+			std::istream(&stream_buff) >> color.x() >> color.y() >> color.z();
+			light->Color(color);
 		}
 
-		XMLNodePtr fall_off_node = light_node->FirstNode("fall_off");
-		if (fall_off_node)
+		float3 light_pos(0, 0, 0);
+		float3 light_dir(0, 0, 1);
+		if (light->Type() != LightSource::LT_Ambient)
 		{
-			XMLAttributePtr attr = fall_off_node->Attrib("x");
-			if (attr)
+			XMLNodePtr dir_node = light_node->FirstNode("dir");
+			if (dir_node)
 			{
-				fall_off.x() = attr->ValueFloat();
-			}
-
-			attr = fall_off_node->Attrib("y");
-			if (attr)
-			{
-				fall_off.y() = attr->ValueFloat();
-			}
-
-			attr = fall_off_node->Attrib("z");
-			if (attr)
-			{
-				fall_off.z() = attr->ValueFloat();
+				auto v = dir_node->Attrib("v")->ValueString();
+				MemInputStreamBuf stream_buff(v.data(), v.size());
+				std::istream(&stream_buff) >> light_dir.x() >> light_dir.y() >> light_dir.z();
 			}
 		}
+		if ((LightSource::LT_Point == light->Type()) || (LightSource::LT_Spot == light->Type())
+			|| (LightSource::LT_SphereArea == light->Type()) || (LightSource::LT_TubeArea == light->Type()))
+		{
+			XMLNodePtr pos_node = light_node->FirstNode("pos");
+			if (pos_node)
+			{
+				auto v = pos_node->Attrib("v")->ValueString();
+				MemInputStreamBuf stream_buff(v.data(), v.size());
+				std::istream(&stream_buff) >> light_pos.x() >> light_pos.y() >> light_pos.z();
+			}
+
+			XMLNodePtr fall_off_node = light_node->FirstNode("fall_off");
+			if (fall_off_node)
+			{
+				float3 fall_off;
+				auto v = fall_off_node->Attrib("v")->ValueString();
+				MemInputStreamBuf stream_buff(v.data(), v.size());
+				std::istream(&stream_buff) >> fall_off.x() >> fall_off.y() >> fall_off.z();
+				light->Falloff(fall_off);
+			}
+
+			if ((LightSource::LT_Point == light->Type()) || (LightSource::LT_Spot == light->Type()))
+			{
+				XMLNodePtr projective_node = light_node->FirstNode("projective");
+				if (projective_node)
+				{
+					XMLAttributePtr attr = projective_node->Attrib("name");
+					if (attr)
+					{
+						TexturePtr projective = ASyncLoadTexture(std::string(attr->ValueString()), EAH_GPU_Read | EAH_Immutable);
+						light->ProjectiveTexture(projective);
+					}
+				}
+
+				if (LightSource::LT_Spot == light->Type())
+				{
+					XMLNodePtr angle_node = light_node->FirstNode("angle");
+					if (angle_node)
+					{
+						light->InnerAngle(angle_node->Attrib("inner")->ValueFloat());
+						light->OuterAngle(angle_node->Attrib("outer")->ValueFloat());
+					}
+				}
+			}
+
+			// TODO: sphere area light and tube area light
+		}
+
+		scene_node->TransformToParent(
+			MathLib::to_matrix(MathLib::axis_to_axis(float3(0, 0, 1), light_dir)) * MathLib::translation(light_pos));
+		scene_node->AddComponent(light);
 
 		XMLNodePtr update_node = light_node->FirstNode("update");
 		if (update_node)
@@ -441,163 +532,69 @@ void ScenePlayerApp::LoadScene(std::string const & name)
 			update_node = update_node->FirstNode();
 			if (update_node && (XNT_CData == update_node->Type()))
 			{
-				update_script = update_node->ValueString();
+				std::string const update_script = std::string(update_node->ValueString());
+				if (!update_script.empty())
+				{
+					light->OnMainThreadUpdate().Connect(LightSourceNodeUpdate(update_script));
+				}
 			}
 		}
 
-		XMLNodePtr projective_node = light_node->FirstNode("projective");
-		if (projective_node)
-		{
-			XMLAttributePtr attr = projective_node->Attrib("name");
-			if (attr)
-			{
-				projective = ASyncLoadTexture(attr->ValueString(), EAH_GPU_Read | EAH_Immutable);
-			}
-		}
-
-		XMLAttributePtr attr = light_node->Attrib("type");
-		BOOST_ASSERT(attr);
-
-		std::string type = attr->ValueString();
-		if ("ambient" == type)
-		{
-			light = MakeSharedPtr<AmbientLightSource>();
-			light->Color(light_clr);
-		}
-		else if ("point" == type)
-		{
-			float3 light_pos(0, 0, 0);
-
-			XMLNodePtr pos_node = light_node->FirstNode("position");
-			if (pos_node)
-			{
-				light_pos.x() = pos_node->Attrib("x")->ValueFloat();
-				light_pos.y() = pos_node->Attrib("y")->ValueFloat();
-				light_pos.z() = pos_node->Attrib("z")->ValueFloat();
-			}
-
-			light = MakeSharedPtr<PointLightSource>();
-			light->Attrib(light_attr);
-			light->Position(light_pos);
-			light->Color(light_clr);
-			light->Falloff(fall_off);
-		}
-		else if ("spot" == type)
-		{
-			float3 light_pos(0, 0, 0);
-			float3 light_dir(0, 0, 1);
-			float outer_angle = PI / 4;
-			float inner_angle = PI / 6;
-
-			XMLNodePtr pos_node = light_node->FirstNode("position");
-			if (pos_node)
-			{
-				light_pos.x() = pos_node->Attrib("x")->ValueFloat();
-				light_pos.y() = pos_node->Attrib("y")->ValueFloat();
-				light_pos.z() = pos_node->Attrib("z")->ValueFloat();
-			}
-
-			XMLNodePtr dir_node = light_node->FirstNode("direction");
-			if (dir_node)
-			{
-				light_dir.x() = dir_node->Attrib("x")->ValueFloat();
-				light_dir.y() = dir_node->Attrib("y")->ValueFloat();
-				light_dir.z() = dir_node->Attrib("z")->ValueFloat();
-			}
-
-			XMLNodePtr angle_node = light_node->FirstNode("angle");
-			if (angle_node)
-			{
-				outer_angle = angle_node->Attrib("outer")->ValueFloat();
-				inner_angle = angle_node->Attrib("inner")->ValueFloat();
-			}
-
-			light = MakeSharedPtr<SpotLightSource>();
-			light->Attrib(light_attr);
-			light->Position(light_pos);
-			light->Direction(light_dir);
-			light->Color(light_clr);
-			light->Falloff(fall_off);
-			light->OuterAngle(outer_angle);
-			light->InnerAngle(inner_angle);
-		}
-		else
-		{
-			BOOST_ASSERT("directional" == type);
-
-			float3 light_dir(0, 0, 1);
-
-			XMLNodePtr dir_node = light_node->FirstNode("direction");
-			if (dir_node)
-			{
-				light_dir.x() = dir_node->Attrib("x")->ValueFloat();
-				light_dir.y() = dir_node->Attrib("y")->ValueFloat();
-				light_dir.z() = dir_node->Attrib("z")->ValueFloat();
-			}
-
-			light = MakeSharedPtr<DirectionalLightSource>();
-			light->Attrib(light_attr);
-			light->Direction(light_dir);
-			light->Color(light_clr);
-			light->Falloff(fall_off);
-		}
-
-		if (!update_script.empty())
-		{
-			light->BindUpdateFunc(LightSourceUpdate(update_script));
-		}
-
-		light->ProjectiveTexture(projective);
-
-		light->AddToSceneManager();
+		Context::Instance().SceneManagerInstance().SceneRootNode().AddChild(scene_node);
 		lights_.push_back(light);
 
-		XMLNodePtr proxy_node = light_node->FirstNode("proxy");
-		if (proxy_node)
+		XMLNodePtr scale_node = light_node->FirstNode("scale");
+		if (scale_node)
 		{
-			float scale = 1;
-			attr = proxy_node->Attrib("scale");
-			if (attr)
+			float3 scale(1, 1, 1);
 			{
-				scale = attr->ValueFloat();
+				auto v = scale_node->Attrib("v")->ValueString();
+				MemInputStreamBuf stream_buff(v.data(), v.size());
+				std::istream(&stream_buff) >> scale.x() >> scale.y() >> scale.z();
 			}
 
-			SceneObjectPtr light_proxy = MakeSharedPtr<SceneObjectLightSourceProxy>(light);
-			checked_pointer_cast<SceneObjectLightSourceProxy>(light_proxy)->Scaling(scale, scale, scale);
-			light_proxy->AddToSceneManager();
-
-			light_proxies_.push_back(light_proxy);
+			auto light_proxy = LoadLightSourceProxyModel(light);
+			light_proxy->RootNode()->TransformToParent(MathLib::scaling(scale) * light_proxy->RootNode()->TransformToParent());
+			scene_node->AddChild(light_proxy->RootNode());
 		}
 	}
 
 	for (XMLNodePtr model_node = root->FirstNode("model"); model_node; model_node = model_node->NextSibling("model"))
 	{
-		uint32_t obj_attr = SceneObject::SOA_Cullable;
+		uint32_t obj_attr = SceneNode::SOA_Cullable;
 		float4x4 obj_mat = float4x4::Identity();
 
-		XMLNodePtr transform_node = model_node->FirstNode("transform");
-		if (transform_node)
+		float3 scale(1, 1, 1);
+		Quaternion rotate = Quaternion::Identity();
+		float3 translate(0, 0, 0);
+
+		XMLNodePtr scale_node = model_node->FirstNode("scale");
+		if (scale_node)
 		{
-			for (XMLNodePtr node = transform_node->FirstNode(); node; node = node->NextSibling())
-			{
-				if ("translation" == node->Name())
-				{
-					float x = node->Attrib("x")->ValueFloat();
-					float y = node->Attrib("y")->ValueFloat();
-					float z = node->Attrib("z")->ValueFloat();
-					obj_mat *= MathLib::translation(x, y, z);
-				}
-				else if ("scaling" == node->Name())
-				{
-					float x = node->Attrib("x")->ValueFloat();
-					float y = node->Attrib("y")->ValueFloat();
-					float z = node->Attrib("z")->ValueFloat();
-					obj_mat *= MathLib::scaling(x, y, z);
-				}
-			}
+			auto v = scale_node->Attrib("v")->ValueString();
+			MemInputStreamBuf stream_buff(v.data(), v.size());
+			std::istream(&stream_buff) >> scale.x() >> scale.y() >> scale.z();
+		}
+		
+		XMLNodePtr rotate_node = model_node->FirstNode("rotate");
+		if (!!rotate_node)
+		{
+			auto v = rotate_node->Attrib("v")->ValueString();
+			MemInputStreamBuf stream_buff(v.data(), v.size());
+			std::istream(&stream_buff) >> rotate.x() >> rotate.y() >> rotate.z() >> rotate.w();
 		}
 
-		XMLNodePtr attribute_node = model_node->FirstNode("attribute");
+		XMLNodePtr translate_node = model_node->FirstNode("translate");
+		if (scale_node)
+		{
+			auto v = translate_node->Attrib("v")->ValueString();
+			MemInputStreamBuf stream_buff(v.data(), v.size());
+			std::istream(&stream_buff) >> translate.x() >> translate.y() >> translate.z();
+		}
+
+		obj_mat = MathLib::transformation<float>(nullptr, nullptr, &scale, nullptr, &rotate, &translate);
+
+		XMLNodePtr attribute_node = model_node->FirstNode("attr");
 		if (attribute_node)
 		{
 			XMLAttributePtr attr = attribute_node->Attrib("value");
@@ -605,28 +602,29 @@ void ScenePlayerApp::LoadScene(std::string const & name)
 			{
 				if (!attr->TryConvert(obj_attr))
 				{
-					obj_attr = SceneObject::SOA_Cullable;
+					obj_attr = SceneNode::SOA_Cullable;
 
+					std::string_view const attr_str = attr->ValueString();
 					std::vector<std::string> tokens;
-					boost::algorithm::split(tokens, attr->ValueString(), boost::is_any_of(" \t|"));
+					boost::algorithm::split(tokens, attr_str, boost::is_any_of(" \t|"));
 					for (auto& token : tokens)
 					{
 						boost::algorithm::trim(token);
 						if ("cullable" == token)
 						{
-							obj_attr |= SceneObject::SOA_Cullable;
+							obj_attr |= SceneNode::SOA_Cullable;
 						}
 						else if ("overlay" == token)
 						{
-							obj_attr |= SceneObject::SOA_Overlay;
+							obj_attr |= SceneNode::SOA_Overlay;
 						}
 						else if ("moveable" == token)
 						{
-							obj_attr |= SceneObject::SOA_Moveable;
+							obj_attr |= SceneNode::SOA_Moveable;
 						}
 						else if ("invisible" == token)
 						{
-							obj_attr |= SceneObject::SOA_Invisible;
+							obj_attr |= SceneNode::SOA_Invisible;
 						}
 					}
 				}
@@ -640,187 +638,85 @@ void ScenePlayerApp::LoadScene(std::string const & name)
 			update_node = update_node->FirstNode();
 			if (update_node && (XNT_CData == update_node->Type()))
 			{
-				update_script = update_node->ValueString();
+				update_script = std::string(update_node->ValueString());
 			}
 		}
 
-		XMLAttributePtr attr = model_node->Attrib("name");
+		XMLAttributePtr attr = model_node->Attrib("meshml");
 		BOOST_ASSERT(attr);
 
-		RenderModelPtr model = ASyncLoadModel(attr->ValueString(), EAH_GPU_Read | EAH_Immutable);
+		auto scene_obj = MakeSharedPtr<SceneNode>(SceneNode::SOA_Cullable);
+		scene_obj->TransformToParent(obj_mat);
+		Context::Instance().SceneManagerInstance().SceneRootNode().AddChild(scene_obj);
+		RenderModelPtr model = ASyncLoadModel(attr->ValueString(), EAH_GPU_Read | EAH_Immutable,
+			obj_attr,
+			[scene_obj](RenderModel& model)
+			{
+				AddToSceneHelper(*scene_obj, model);
+			});
 		scene_models_.push_back(model);
-		SceneObjectPtr scene_obj = MakeSharedPtr<SceneObjectHelper>(model, obj_attr);
-		scene_obj->ModelMatrix(obj_mat);
 		if (!update_script.empty())
 		{
-			scene_obj->BindSubThreadUpdateFunc(SceneObjectUpdate(update_script));
+			scene_obj->OnSubThreadUpdate().Connect(SceneNodeUpdate(update_script));
 		}
 		scene_objs_.push_back(scene_obj);
-		scene_obj->AddToSceneManager();
-	}
-
-	{
-		XMLNodePtr skybox_node = root->FirstNode("skybox");
-
-		XMLAttributePtr y_cube_attr = skybox_node->Attrib("y_cube");
-		if (y_cube_attr)
-		{
-			XMLAttributePtr c_cube_attr = skybox_node->Attrib("c_cube");
-			BOOST_ASSERT(c_cube_attr);
-
-			sky_box_ = MakeSharedPtr<SceneObjectSkyBox>();
-			checked_pointer_cast<SceneObjectSkyBox>(sky_box_)->CompressedCubeMap(
-				ASyncLoadTexture(y_cube_attr->ValueString(), EAH_GPU_Read | EAH_Immutable),
-				ASyncLoadTexture(c_cube_attr->ValueString(), EAH_GPU_Read | EAH_Immutable));
-		}
-		else
-		{
-			XMLAttributePtr cube_attr = skybox_node->Attrib("cube");
-			if (cube_attr)
-			{
-				sky_box_ = MakeSharedPtr<SceneObjectSkyBox>();
-				checked_pointer_cast<SceneObjectSkyBox>(sky_box_)->CubeMap(
-					ASyncLoadTexture(cube_attr->ValueString(), EAH_GPU_Read | EAH_Immutable));
-			}
-			else
-			{
-				Color color(0, 0, 0, 1);
-
-				XMLAttributePtr r_attr = skybox_node->Attrib("r");
-				if (r_attr)
-				{
-					color.r() = r_attr->ValueFloat();
-				}
-				XMLAttributePtr g_attr = skybox_node->Attrib("g");
-				if (g_attr)
-				{
-					color.g() = g_attr->ValueFloat();
-				}
-				XMLAttributePtr b_attr = skybox_node->Attrib("b");
-				if (b_attr)
-				{
-					color.b() = b_attr->ValueFloat();
-				}
-
-				uint32_t texel;
-				ElementFormat fmt;
-				if (rf.RenderEngineInstance().DeviceCaps().texture_format_support(EF_ABGR8))
-				{
-					fmt = EF_ABGR8;
-					texel = color.ABGR();
-				}
-				else
-				{
-					BOOST_ASSERT(rf.RenderEngineInstance().DeviceCaps().texture_format_support(EF_ARGB8));
-
-					fmt = EF_ARGB8;
-					texel = color.ARGB();
-				}
-				ElementInitData init_data[6];
-				for (int i = 0; i < 6; ++ i)
-				{
-					init_data[i].data = &texel;
-					init_data[i].row_pitch = sizeof(uint32_t);
-					init_data[i].slice_pitch = init_data[i].row_pitch;	
-				}
-
-				sky_box_ = MakeSharedPtr<SceneObjectSkyBox>();
-				checked_pointer_cast<SceneObjectSkyBox>(sky_box_)->CubeMap(rf.MakeTextureCube(1, 1, 1, fmt, 1, 0, EAH_GPU_Read | EAH_Immutable, init_data));
-			}
-		}
-
-		sky_box_->AddToSceneManager();
 	}
 
 	{
 		float3 eye_pos(0, 0, -1);
 		float3 look_at(0, 0, 0);
 		float3 up(0, 1, 0);
-		float near_plane = 0.1f;
-		float far_plane = 500;
+		float fov = PI / 4;
+		float near_plane = 1;
+		float far_plane = 1000;
+
+		RenderEngine& re = Context::Instance().RenderFactoryInstance().RenderEngineInstance();
+		FrameBuffer& fb = *re.CurFrameBuffer();
+		float aspect = static_cast<float>(fb.Width()) / fb.Height();
 
 		XMLNodePtr camera_node = root->FirstNode("camera");
 
-		XMLAttributePtr x_attr = camera_node->Attrib("x");
-		if (x_attr)
+		XMLNodePtr eye_pos_node = camera_node->FirstNode("eye_pos");
+		if (eye_pos_node)
 		{
-			eye_pos.x() = x_attr->ValueFloat();
+			auto v = eye_pos_node->Attrib("v")->ValueString();
+			MemInputStreamBuf stream_buff(v.data(), v.size());
+			std::istream(&stream_buff) >> eye_pos.x() >> eye_pos.y() >> eye_pos.z();
 		}
-
-		XMLAttributePtr y_attr = camera_node->Attrib("y");
-		if (y_attr)
-		{
-			eye_pos.y() = y_attr->ValueFloat();
-		}
-
-		XMLAttributePtr z_attr = camera_node->Attrib("z");
-		if (z_attr)
-		{
-			eye_pos.z() = z_attr->ValueFloat();
-		}
-
 		XMLNodePtr look_at_node = camera_node->FirstNode("look_at");
 		if (look_at_node)
 		{
-			x_attr = look_at_node->Attrib("x");
-			if (x_attr)
-			{
-				look_at.x() = x_attr->ValueFloat();
-			}
-
-			y_attr = look_at_node->Attrib("y");
-			if (y_attr)
-			{
-				look_at.y() = y_attr->ValueFloat();
-			}
-
-			z_attr = look_at_node->Attrib("z");
-			if (z_attr)
-			{
-				look_at.z() = z_attr->ValueFloat();
-			}
+			auto v = look_at_node->Attrib("v")->ValueString();
+			MemInputStreamBuf stream_buff(v.data(), v.size());
+			std::istream(&stream_buff) >> look_at.x() >> look_at.y() >> look_at.z();
 		}
-
 		XMLNodePtr up_node = camera_node->FirstNode("up");
 		if (up_node)
 		{
-			x_attr = up_node->Attrib("x");
-			if (x_attr)
-			{
-				up.x() = x_attr->ValueFloat();
-			}
-
-			y_attr = up_node->Attrib("y");
-			if (y_attr)
-			{
-				up.y() = y_attr->ValueFloat();
-			}
-
-			z_attr = up_node->Attrib("z");
-			if (z_attr)
-			{
-				up.z() = z_attr->ValueFloat();
-			}
+			auto v = up_node->Attrib("v")->ValueString();
+			MemInputStreamBuf stream_buff(v.data(), v.size());
+			std::istream(&stream_buff) >> up.x() >> up.y() >> up.z();
 		}
 
-		XMLNodePtr near_node = camera_node->FirstNode("near_plane");
-		if (near_node)
+		XMLNodePtr fov_node = camera_node->FirstNode("fov");
+		if (fov_node)
 		{
-			XMLAttributePtr val_attr = near_node->Attrib("value");
-			if (val_attr)
-			{
-				near_plane = val_attr->ValueFloat();
-			}
+			fov = fov_node->Attrib("s")->ValueFloat();
 		}
-
-		XMLNodePtr far_node = camera_node->FirstNode("far_plane");
-		if (far_node)
+		XMLNodePtr aspect_node = camera_node->FirstNode("aspect");
+		if (aspect_node)
 		{
-			XMLAttributePtr val_attr = far_node->Attrib("value");
-			if (val_attr)
-			{
-				far_plane = val_attr->ValueFloat();
-			}
+			aspect = aspect_node->Attrib("s")->ValueFloat();
+		}
+		XMLNodePtr near_plane_node = camera_node->FirstNode("near");
+		if (near_plane_node)
+		{
+			near_plane = near_plane_node->Attrib("s")->ValueFloat();
+		}
+		XMLNodePtr far_plane_node = camera_node->FirstNode("far");
+		if (far_plane_node)
+		{
+			far_plane = far_plane_node->Attrib("s")->ValueFloat();
 		}
 
 		std::string update_script;
@@ -831,23 +727,24 @@ void ScenePlayerApp::LoadScene(std::string const & name)
 			update_node = update_node->FirstNode();
 			if (update_node && (XNT_CData == update_node->Type()))
 			{
-				update_script = update_node->ValueString();
+				update_script = std::string(update_node->ValueString());
 			}
 		}
 
+		auto& camera = this->ActiveCamera();
+		camera.LookAtDist(MathLib::length(look_at - eye_pos));
+		camera.BoundSceneNode()->TransformToWorld(MathLib::inverse(MathLib::look_at_lh(eye_pos, look_at, up)));
+		camera.ProjParams(fov, aspect, near_plane, far_plane);
 		if (!update_script.empty())
 		{
-			this->ActiveCamera().BindUpdateFunc(CameraUpdate(update_script));
+			camera.OnMainThreadUpdate().Connect(CameraUpdate(update_script));
 		}
-
-		this->LookAt(eye_pos, look_at, up);
-		this->Proj(near_plane, far_plane);
 	}
 }
 
 void ScenePlayerApp::OnCreate()
 {
-	this->LoadScene("DeferredRendering.scene");
+	this->LoadScene("DeferredRendering.kges");
 
 	font_ = SyncLoadFont("gkai00mp.kfont");
 
@@ -857,13 +754,17 @@ void ScenePlayerApp::OnCreate()
 
 	InputEngine& inputEngine(Context::Instance().InputFactoryInstance().InputEngineInstance());
 	InputActionMap actionMap;
-	actionMap.AddActions(actions, actions + sizeof(actions) / sizeof(actions[0]));
+	actionMap.AddActions(actions, actions + std::size(actions));
 
 	action_handler_t input_handler = MakeSharedPtr<input_signal>();
-	input_handler->connect(std::bind(&ScenePlayerApp::InputHandler, this, std::placeholders::_1, std::placeholders::_2));
+	input_handler->Connect(
+		[this](InputEngine const & sender, InputAction const & action)
+		{
+			this->InputHandler(sender, action);
+		});
 	inputEngine.ActionMap(actionMap, input_handler);
 
-	UIManager::Instance().Load(ResLoader::Instance().Open("ScenePlayer.uiml"));
+	UIManager::Instance().Load(*ResLoader::Instance().Open("ScenePlayer.uiml"));
 	dialog_ = UIManager::Instance().GetDialogs()[0];
 
 	id_open_ = dialog_->IDFromName("Open");
@@ -877,31 +778,67 @@ void ScenePlayerApp::OnCreate()
 	id_cg_ = dialog_->IDFromName("CG");
 	id_ctrl_camera_ = dialog_->IDFromName("CtrlCamera");
 
-	dialog_->Control<UIButton>(id_open_)->OnClickedEvent().connect(std::bind(&ScenePlayerApp::OpenHandler, this, std::placeholders::_1));
+	dialog_->Control<UIButton>(id_open_)->OnClickedEvent().Connect(
+		[this](UIButton const & sender)
+		{
+			this->OpenHandler(sender);
+		});
 
-	dialog_->Control<UIComboBox>(id_illum_combo_)->OnSelectionChangedEvent().connect(std::bind(&ScenePlayerApp::IllumChangedHandler, this, std::placeholders::_1));
+	dialog_->Control<UIComboBox>(id_illum_combo_)->OnSelectionChangedEvent().Connect(
+		[this](UIComboBox const & sender)
+		{
+			this->IllumChangedHandler(sender);
+		});
 	this->IllumChangedHandler(*dialog_->Control<UIComboBox>(id_illum_combo_));
 
 	dialog_->Control<UISlider>(id_il_scale_slider_)->SetValue(static_cast<int>(il_scale_ * 10));
-	dialog_->Control<UISlider>(id_il_scale_slider_)->OnValueChangedEvent().connect(std::bind(&ScenePlayerApp::ILScaleChangedHandler, this, std::placeholders::_1));
+	dialog_->Control<UISlider>(id_il_scale_slider_)->OnValueChangedEvent().Connect(
+		[this](UISlider const & sender)
+		{
+			this->ILScaleChangedHandler(sender);
+		});
 	this->ILScaleChangedHandler(*dialog_->Control<UISlider>(id_il_scale_slider_));
 
-	dialog_->Control<UICheckBox>(id_ssgi_)->OnChangedEvent().connect(std::bind(&ScenePlayerApp::SSGIHandler, this, std::placeholders::_1));
+	dialog_->Control<UICheckBox>(id_ssgi_)->OnChangedEvent().Connect(
+		[this](UICheckBox const & sender)
+		{
+			this->SSGIHandler(sender);
+		});
 	this->SSGIHandler(*dialog_->Control<UICheckBox>(id_ssgi_));
 
-	dialog_->Control<UICheckBox>(id_ssvo_)->OnChangedEvent().connect(std::bind(&ScenePlayerApp::SSVOHandler, this, std::placeholders::_1));
+	dialog_->Control<UICheckBox>(id_ssvo_)->OnChangedEvent().Connect(
+		[this](UICheckBox const & sender)
+		{
+			this->SSVOHandler(sender);
+		});
 	this->SSVOHandler(*dialog_->Control<UICheckBox>(id_ssvo_));
 
-	dialog_->Control<UICheckBox>(id_hdr_)->OnChangedEvent().connect(std::bind(&ScenePlayerApp::HDRHandler, this, std::placeholders::_1));
+	dialog_->Control<UICheckBox>(id_hdr_)->OnChangedEvent().Connect(
+		[this](UICheckBox const & sender)
+		{
+			this->HDRHandler(sender);
+		});
 	this->HDRHandler(*dialog_->Control<UICheckBox>(id_hdr_));
 
-	dialog_->Control<UICheckBox>(id_aa_)->OnChangedEvent().connect(std::bind(&ScenePlayerApp::AAHandler, this, std::placeholders::_1));
+	dialog_->Control<UICheckBox>(id_aa_)->OnChangedEvent().Connect(
+		[this](UICheckBox const & sender)
+		{
+			this->AAHandler(sender);
+		});
 	this->AAHandler(*dialog_->Control<UICheckBox>(id_aa_));
 
-	dialog_->Control<UICheckBox>(id_cg_)->OnChangedEvent().connect(std::bind(&ScenePlayerApp::ColorGradingHandler, this, std::placeholders::_1));
+	dialog_->Control<UICheckBox>(id_cg_)->OnChangedEvent().Connect(
+		[this](UICheckBox const & sender)
+		{
+			this->ColorGradingHandler(sender);
+		});
 	this->ColorGradingHandler(*dialog_->Control<UICheckBox>(id_cg_));
 
-	dialog_->Control<UICheckBox>(id_ctrl_camera_)->OnChangedEvent().connect(std::bind(&ScenePlayerApp::CtrlCameraHandler, this, std::placeholders::_1));
+	dialog_->Control<UICheckBox>(id_ctrl_camera_)->OnChangedEvent().Connect(
+		[this](UICheckBox const & sender)
+		{
+			this->CtrlCameraHandler(sender);
+		});
 }
 
 void ScenePlayerApp::OnResize(uint32_t width, uint32_t height)
@@ -937,12 +874,12 @@ void ScenePlayerApp::OpenHandler(UIButton const & /*sender*/)
 	ofn.lpstrFile = fn;
 	ofn.lpstrFile[0] = '\0';
 	ofn.nMaxFile = sizeof(fn);
-	ofn.lpstrFilter = "Scene File\0*.scene\0All\0*.*\0";
+	ofn.lpstrFilter = "Scene File\0*.kges\0All\0*.*\0";
 	ofn.nFilterIndex = 1;
 	ofn.lpstrFileTitle = nullptr;
 	ofn.nMaxFileTitle = 0;
 	ofn.lpstrInitialDir = nullptr;
-	ofn.Flags = OFN_NOCHANGEDIR | OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
+	ofn.Flags = OFN_NOCHANGEDIR | OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
 
 	if (GetOpenFileNameA(&ofn))
 	{
@@ -1030,6 +967,14 @@ void ScenePlayerApp::DoUpdateOverlay()
 	stream.precision(2);
 	stream << std::fixed << this->FPS() << " FPS";
 	font_->RenderText(0, 36, Color(1, 1, 0, 1), stream.str(), 16);
+
+	uint32_t const num_loading_res = ResLoader::Instance().NumLoadingResources();
+	if (num_loading_res > 0)
+	{
+		stream.str(L"");
+		stream << "Loading " << num_loading_res << " resources...";
+		font_->RenderText(100, 300, Color(1, 0, 0, 1), stream.str(), 48);
+	}
 }
 
 uint32_t ScenePlayerApp::DoUpdate(uint32_t pass)

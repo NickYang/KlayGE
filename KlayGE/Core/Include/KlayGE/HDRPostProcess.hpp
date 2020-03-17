@@ -31,19 +31,17 @@ namespace KlayGE
 	class KLAYGE_CORE_API SumLumPostProcess : public PostProcess
 	{
 	public:
-		explicit SumLumPostProcess(RenderTechniquePtr const & tech);
+		SumLumPostProcess();
 		virtual ~SumLumPostProcess();
 
-		void InputPin(uint32_t index, TexturePtr const & tex);
-		TexturePtr const & InputPin(uint32_t index) const;
+		void InputPin(uint32_t index, ShaderResourceViewPtr const& srv) override;
+		using PostProcess::InputPin;
 
 	private:
 		void GetSampleOffsets4x4(uint32_t width, uint32_t height);
 
 	protected:
 		std::vector<float4> tex_coord_offset_;
-
-		RenderEffectParameterPtr tex_coord_offset_ep_;
 	};
 
 	class KLAYGE_CORE_API SumLumLogPostProcess : public SumLumPostProcess
@@ -75,10 +73,11 @@ namespace KlayGE
 
 	private:
 		TexturePtr adapted_textures_[2];
+		RenderTargetViewPtr adapted_rtvs_[2];
 		bool last_index_;
 
-		RenderEffectParameterPtr last_lum_tex_ep_;
-		RenderEffectParameterPtr frame_delta_ep_;
+		RenderEffectParameter* last_lum_tex_ep_;
+		RenderEffectParameter* frame_delta_ep_;
 	};
 
 	class KLAYGE_CORE_API AdaptedLumPostProcessCS : public PostProcess
@@ -90,7 +89,7 @@ namespace KlayGE
 		void OnRenderBegin();
 
 	private:
-		RenderEffectParameterPtr frame_delta_ep_;
+		RenderEffectParameter* frame_delta_ep_;
 	};
 
 	class KLAYGE_CORE_API ImageStatPostProcess : public PostProcess
@@ -98,10 +97,10 @@ namespace KlayGE
 	public:
 		ImageStatPostProcess();
 
-		void InputPin(uint32_t index, TexturePtr const & tex);
-		TexturePtr const & InputPin(uint32_t index) const;
-		void OutputPin(uint32_t index, TexturePtr const & tex, int level = 0, int array_index = 0, int face = 0);
-		TexturePtr const & OutputPin(uint32_t index) const;
+		void InputPin(uint32_t index, ShaderResourceViewPtr const& srv) override;
+		ShaderResourceViewPtr const& InputPin(uint32_t index) const override;
+		void OutputPin(uint32_t index, RenderTargetViewPtr const& rtv) override;
+		RenderTargetViewPtr const& RtvOutputPin(uint32_t index) const override;
 		void Apply();
 
 	private:
@@ -115,10 +114,10 @@ namespace KlayGE
 	public:
 		ImageStatPostProcessCS();
 
-		void InputPin(uint32_t index, TexturePtr const & tex);
-		TexturePtr const & InputPin(uint32_t index) const;
-		void OutputPin(uint32_t index, TexturePtr const & tex, int level = 0, int array_index = 0, int face = 0);
-		TexturePtr const & OutputPin(uint32_t index) const;
+		void InputPin(uint32_t index, ShaderResourceViewPtr const& srv) override;
+		ShaderResourceViewPtr const& InputPin(uint32_t index) const override;
+		void OutputPin(uint32_t index, UnorderedAccessViewPtr const& uav) override;
+		UnorderedAccessViewPtr const& UavOutputPin(uint32_t index) const override;
 		void Apply();
 
 	private:
@@ -131,10 +130,10 @@ namespace KlayGE
 	public:
 		LensEffectsPostProcess();
 
-		void InputPin(uint32_t index, TexturePtr const & tex);
-		TexturePtr const & InputPin(uint32_t index) const;
-		void OutputPin(uint32_t index, TexturePtr const & tex, int level = 0, int array_index = 0, int face = 0);
-		TexturePtr const & OutputPin(uint32_t index) const;
+		void InputPin(uint32_t index, ShaderResourceViewPtr const& srv) override;
+		ShaderResourceViewPtr const& InputPin(uint32_t index) const override;
+		void OutputPin(uint32_t index, RenderTargetViewPtr const& rtv) override;
+		RenderTargetViewPtr const& RtvOutputPin(uint32_t index) const override;
 		void Apply();
 
 	private:
@@ -149,10 +148,10 @@ namespace KlayGE
 	public:
 		FFTLensEffectsPostProcess();
 
-		void InputPin(uint32_t index, TexturePtr const & tex);
-		TexturePtr const & InputPin(uint32_t index) const;
-		void OutputPin(uint32_t index, TexturePtr const & tex, int level = 0, int array_index = 0, int face = 0);
-		TexturePtr const & OutputPin(uint32_t index) const;
+		void InputPin(uint32_t index, ShaderResourceViewPtr const& srv) override;
+		ShaderResourceViewPtr const& InputPin(uint32_t index) const override;
+		void OutputPin(uint32_t index, RenderTargetViewPtr const& rtv) override;
+		RenderTargetViewPtr const& RtvOutputPin(uint32_t index) const override;
 		void Apply();
 
 	private:
@@ -161,28 +160,26 @@ namespace KlayGE
 		PostProcessPtr complex_mul_pp_;
 		PostProcessPtr scaled_copy_pp_;
 
-		std::vector<TexturePtr> restore_chain_;
+		std::vector<TexturePtr> restore_chain_texs_;
+		std::vector<ShaderResourceViewPtr> restore_chain_srvs_;
+		std::vector<RenderTargetViewPtr> restore_chain_rtvs_;
 
-		TexturePtr input_tex_;
+		ShaderResourceViewPtr input_srv_;
 
-		TexturePtr resized_tex_;
-		TexturePtr empty_tex_;
+		ShaderResourceViewPtr resized_srv_;
+		ShaderResourceViewPtr empty_srv_;
 
 		TexturePtr freq_real_tex_;
 		TexturePtr freq_imag_tex_;
 		TexturePtr pattern_real_tex_;
 		TexturePtr pattern_imag_tex_;
 		TexturePtr mul_real_tex_;
+		ShaderResourceViewPtr mul_real_srv_;
 		TexturePtr mul_imag_tex_;
+		ShaderResourceViewPtr mul_imag_srv_;
 
 		GpuFftPtr fft_;
 		GpuFftPtr ifft_;
-	};
-
-	class KLAYGE_CORE_API ToneMappingPostProcess : public PostProcess
-	{
-	public:
-		ToneMappingPostProcess();
 	};
 
 
@@ -191,10 +188,10 @@ namespace KlayGE
 	public:
 		explicit HDRPostProcess(bool fft_lens_effects);
 
-		void InputPin(uint32_t index, TexturePtr const & tex);
-		TexturePtr const & InputPin(uint32_t index) const;
-		void OutputPin(uint32_t index, TexturePtr const & tex, int level = 0, int array_index = 0, int face = 0);
-		TexturePtr const & OutputPin(uint32_t index) const;
+		void InputPin(uint32_t index, ShaderResourceViewPtr const& srv) override;
+		ShaderResourceViewPtr const& InputPin(uint32_t index) const override;
+		void OutputPin(uint32_t index, RenderTargetViewPtr const& rtv) override;
+		RenderTargetViewPtr const& RtvOutputPin(uint32_t index) const override;
 		void Apply();
 
 	private:

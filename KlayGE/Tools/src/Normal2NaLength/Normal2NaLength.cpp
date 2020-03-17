@@ -1,4 +1,5 @@
 #include <KlayGE/KlayGE.hpp>
+#include <KFL/ErrorHandling.hpp>
 #include <KFL/Util.hpp>
 #include <KlayGE/Texture.hpp>
 #include <KFL/Math.hpp>
@@ -39,20 +40,19 @@ namespace
 
 		if (IsCompressedFormat(com_format))
 		{
-			TexCompressionPtr tex_codec;
+			std::unique_ptr<TexCompression> tex_codec;
 			switch (com_format)
 			{
 			case EF_BC3:
-				tex_codec = MakeSharedPtr<TexCompressionBC3>();
+				tex_codec = MakeUniquePtr<TexCompressionBC3>();
 				break;
 
 			case EF_BC5:
-				tex_codec = MakeSharedPtr<TexCompressionBC5>();
+				tex_codec = MakeUniquePtr<TexCompressionBC5>();
 				break;
 
 			default:
-				BOOST_ASSERT(false);
-				break;
+				KFL_UNREACHABLE("Compression formats other than BC3 and BC5 are not supported");
 			}
 
 			for (uint32_t y_base = 0; y_base < height; y_base += 4)
@@ -144,14 +144,15 @@ namespace
 
 	void Normal2NaLength(std::string const & in_file, std::string const & out_file, ElementFormat new_format)
 	{
-		Texture::TextureType in_type;
-		uint32_t in_width, in_height, in_depth;
-		uint32_t in_num_mipmaps;
-		uint32_t in_array_size;
-		ElementFormat in_format;
-		std::vector<ElementInitData> in_data;
-		std::vector<uint8_t> in_data_block;
-		LoadTexture(in_file, in_type, in_width, in_height, in_depth, in_num_mipmaps, in_array_size, in_format, in_data, in_data_block);
+		TexturePtr in_tex = LoadSoftwareTexture(in_file);
+		auto const in_type = in_tex->Type();
+		auto const in_width = in_tex->Width(0);
+		auto const in_height = in_tex->Height(0);
+		auto const in_depth = in_tex->Depth(0);
+		auto const in_num_mipmaps = in_tex->NumMipMaps();
+		auto const in_array_size = in_tex->ArraySize();
+		auto const in_format = in_tex->Format();
+		auto const & in_data = checked_cast<SoftwareTexture&>(*in_tex).SubresourceData();
 
 		TexCompressionBC4 bc4_codec;
 
@@ -313,7 +314,10 @@ namespace
 			}
 		}
 
-		SaveTexture(out_file, in_type, in_width, in_height, in_depth, in_num_mipmaps, in_array_size, new_format, new_data);
+		TexturePtr out_tex = MakeSharedPtr<SoftwareTexture>(in_type, in_width, in_height, in_depth,
+			in_num_mipmaps, in_array_size, new_format, true);
+		out_tex->CreateHWResource(new_data, nullptr);
+		SaveTexture(out_tex, out_file);
 	}
 }
 

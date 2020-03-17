@@ -42,15 +42,15 @@
 namespace KlayGE
 {
 	template <typename T, int N>
-	class Vector_T : boost::addable<Vector_T<T, N>,
-						boost::subtractable<Vector_T<T, N>,
-						boost::multipliable<Vector_T<T, N>,
-						boost::dividable<Vector_T<T, N>,
-						boost::dividable2<Vector_T<T, N>, T,
-						boost::multipliable2<Vector_T<T, N>, T,
-						boost::addable2<Vector_T<T, N>, T,
-						boost::subtractable2<Vector_T<T, N>, T,
-						boost::equality_comparable<Vector_T<T, N>>>>>>>>>>
+	class Vector_T final : boost::addable<Vector_T<T, N>,
+							boost::subtractable<Vector_T<T, N>,
+							boost::multipliable<Vector_T<T, N>,
+							boost::dividable<Vector_T<T, N>,
+							boost::dividable2<Vector_T<T, N>, T,
+							boost::multipliable2<Vector_T<T, N>, T,
+							boost::addable2<Vector_T<T, N>, T,
+							boost::subtractable2<Vector_T<T, N>, T,
+							boost::equality_comparable<Vector_T<T, N>>>>>>>>>>
 	{
 		template <typename U, int M>
 		friend class Vector_T;
@@ -75,158 +75,149 @@ namespace KlayGE
 		enum { elem_num = N };
 
 	public:
-		Vector_T() KLAYGE_NOEXCEPT
+		constexpr Vector_T() noexcept
 		{
 		}
-		explicit Vector_T(T const * rhs) KLAYGE_NOEXCEPT
+		explicit constexpr Vector_T(T const * rhs) noexcept
 		{
-			detail::vector_helper<T, N>::DoCopy(&vec_[0], rhs);
+			detail::vector_helper<T, N>::DoCopy(vec_.data(), rhs);
 		}
-		explicit Vector_T(T const & rhs) KLAYGE_NOEXCEPT
+		constexpr Vector_T(T const & rhs) noexcept
 		{
-			detail::vector_helper<T, N>::DoAssign(&vec_[0], rhs);
+			detail::vector_helper<T, N>::DoAssign(vec_.data(), rhs);
 		}
-		Vector_T(Vector_T const & rhs) KLAYGE_NOEXCEPT
+		Vector_T(Vector_T const & rhs) noexcept
 		{
-			detail::vector_helper<T, N>::DoCopy(&vec_[0], &rhs[0]);
+			detail::vector_helper<T, N>::DoCopy(vec_.data(), rhs.data());
 		}
-		Vector_T(Vector_T&& rhs) KLAYGE_NOEXCEPT
+		Vector_T(Vector_T&& rhs) noexcept
 			: vec_(std::move(rhs.vec_))
 		{
 		}
 		template <typename U, int M>
-		Vector_T(Vector_T<U, M> const & rhs) KLAYGE_NOEXCEPT
+		constexpr Vector_T(Vector_T<U, M> const & rhs) noexcept
 		{
 			static_assert(M >= N, "Could not convert to a smaller vector.");
 
-			detail::vector_helper<T, N>::DoCopy(&vec_[0], &rhs[0]);
+			detail::vector_helper<T, N>::DoCopy(vec_.data(), rhs.data());
 		}
 
-		Vector_T(T const & x, T const & y) KLAYGE_NOEXCEPT
+		constexpr Vector_T(T const & x, T const & y) noexcept
+			: vec_{ x, y }
 		{
 			static_assert(2 == elem_num, "Must be 2D vector.");
-
-			this->x() = x;
-			this->y() = y;
 		}
-		Vector_T(T&& x, T&& y) KLAYGE_NOEXCEPT
+		constexpr Vector_T(T&& x, T&& y) noexcept
+			: vec_{ std::move(x), std::move(y) }
 		{
 			static_assert(2 == elem_num, "Must be 2D vector.");
-
-			vec_[0] = std::move(x);
-			vec_[1] = std::move(y);
 		}
-		Vector_T(T const & x, T const & y, T const & z) KLAYGE_NOEXCEPT
+		constexpr Vector_T(T const & x, T const & y, T const & z) noexcept
+			: vec_{ x, y, z }
 		{
 			static_assert(3 == elem_num, "Must be 3D vector.");
-
-			this->x() = x;
-			this->y() = y;
-			this->z() = z;
 		}
-		Vector_T(T&& x, T&& y, T&& z) KLAYGE_NOEXCEPT
+		constexpr Vector_T(T&& x, T&& y, T&& z) noexcept
+			: vec_{ std::move(x), std::move(y), std::move(z) }
 		{
 			static_assert(3 == elem_num, "Must be 3D vector.");
-
-			vec_[0] = std::move(x);
-			vec_[1] = std::move(y);
-			vec_[2] = std::move(z);
 		}
-		Vector_T(T const & x, T const & y, T const & z, T const & w) KLAYGE_NOEXCEPT
+		constexpr Vector_T(T const & x, T const & y, T const & z, T const & w) noexcept
+			: vec_{ x, y, z, w }
 		{
 			static_assert(4 == elem_num, "Must be 4D vector.");
-
-			this->x() = x;
-			this->y() = y;
-			this->z() = z;
-			this->w() = w;
 		}
-		Vector_T(T&& x, T&& y, T&& z, T&& w) KLAYGE_NOEXCEPT
+		constexpr Vector_T(T&& x, T&& y, T&& z, T&& w) noexcept
+			: vec_{ std::move(x), std::move(y), std::move(z), std::move(w) }
 		{
 			static_assert(4 == elem_num, "Must be 4D vector.");
-
-			vec_[0] = std::move(x);
-			vec_[1] = std::move(y);
-			vec_[2] = std::move(z);
-			vec_[3] = std::move(w);
 		}
 
-		static size_t size() KLAYGE_NOEXCEPT
+		static size_t size() noexcept
 		{
 			return elem_num;
 		}
 
-		static Vector_T const & Zero() KLAYGE_NOEXCEPT
+		static Vector_T const & Zero() noexcept
 		{
 			static Vector_T<T, N> const zero(T(0));
 			return zero;
 		}
 
 		// 取向量
-		iterator begin() KLAYGE_NOEXCEPT
+		iterator begin() noexcept
 		{
 			return vec_.begin();
 		}
-		const_iterator begin() const KLAYGE_NOEXCEPT
+		constexpr const_iterator begin() const noexcept
 		{
 			return vec_.begin();
 		}
-		iterator end() KLAYGE_NOEXCEPT
+		iterator end() noexcept
 		{
 			return vec_.end();
 		}
-		const_iterator end() const KLAYGE_NOEXCEPT
+		constexpr const_iterator end() const noexcept
 		{
 			return vec_.end();
 		}
-		reference operator[](size_t index) KLAYGE_NOEXCEPT
+		reference operator[](size_t index) noexcept
 		{
 			return vec_[index];
 		}
-		const_reference operator[](size_t index) const KLAYGE_NOEXCEPT
+		constexpr const_reference operator[](size_t index) const noexcept
 		{
 			return vec_[index];
 		}
 
-		reference x() KLAYGE_NOEXCEPT
+		pointer data() noexcept
+		{
+			return &vec_[0];
+		}
+		constexpr const_pointer data() const noexcept
+		{
+			return &vec_[0];
+		}
+
+		reference x() noexcept
 		{
 			static_assert(elem_num >= 1, "Must be 1D vector.");
 			return vec_[0];
 		}
-		const_reference x() const KLAYGE_NOEXCEPT
+		constexpr const_reference x() const noexcept
 		{
 			static_assert(elem_num >= 1, "Must be 1D vector.");
 			return vec_[0];
 		}
 
-		reference y() KLAYGE_NOEXCEPT
+		reference y() noexcept
 		{
 			static_assert(elem_num >= 2, "Must be 2D vector.");
 			return vec_[1];
 		}
-		const_reference y() const KLAYGE_NOEXCEPT
+		constexpr const_reference y() const noexcept
 		{
 			static_assert(elem_num >= 2, "Must be 2D vector.");
 			return vec_[1];
 		}
 
-		reference z() KLAYGE_NOEXCEPT
+		reference z() noexcept
 		{
 			static_assert(elem_num >= 3, "Must be 3D vector.");
 			return vec_[2];
 		}
-		const_reference z() const KLAYGE_NOEXCEPT
+		constexpr const_reference z() const noexcept
 		{
 			static_assert(elem_num >= 3, "Must be 3D vector.");
 			return vec_[2];
 		}
 
-		reference w() KLAYGE_NOEXCEPT
+		reference w() noexcept
 		{
 			static_assert(elem_num >= 4, "Must be 4D vector.");
 			return vec_[3];
 		}
-		const_reference w() const KLAYGE_NOEXCEPT
+		constexpr const_reference w() const noexcept
 		{
 			static_assert(elem_num >= 4, "Must be 4D vector.");
 			return vec_[3];
@@ -234,54 +225,54 @@ namespace KlayGE
 
 		// 赋值操作符
 		template <typename U>
-		Vector_T const & operator+=(Vector_T<U, N> const & rhs) KLAYGE_NOEXCEPT
+		Vector_T const & operator+=(Vector_T<U, N> const & rhs) noexcept
 		{
-			detail::vector_helper<T, N>::DoAdd(&vec_[0], &vec_[0], &rhs.vec_[0]);
+			detail::vector_helper<T, N>::DoAdd(vec_.data(), vec_.data(), rhs.data());
 			return *this;
 		}
 		template <typename U>
-		Vector_T const & operator+=(U const & rhs) KLAYGE_NOEXCEPT
+		Vector_T const & operator+=(U const & rhs) noexcept
 		{
-			detail::vector_helper<T, N>::DoAdd(&vec_[0], &vec_[0], rhs);
+			detail::vector_helper<T, N>::DoAdd(vec_.data(), vec_.data(), rhs);
 			return *this;
 		}
 		template <typename U>
-		Vector_T const & operator-=(Vector_T<U, N> const & rhs) KLAYGE_NOEXCEPT
+		Vector_T const & operator-=(Vector_T<U, N> const & rhs) noexcept
 		{
-			detail::vector_helper<T, N>::DoSub(&vec_[0], &vec_[0], &rhs.vec_[0]);
+			detail::vector_helper<T, N>::DoSub(vec_.data(), vec_.data(), rhs.data());
 			return *this;
 		}
 		template <typename U>
-		Vector_T const & operator-=(U const & rhs) KLAYGE_NOEXCEPT
+		Vector_T const & operator-=(U const & rhs) noexcept
 		{
-			detail::vector_helper<T, N>::DoSub(&vec_[0], &vec_[0], rhs);
+			detail::vector_helper<T, N>::DoSub(vec_.data(), vec_.data(), rhs);
 			return *this;
 		}
 		template <typename U>
-		Vector_T const & operator*=(Vector_T<U, N> const & rhs) KLAYGE_NOEXCEPT
+		Vector_T const & operator*=(Vector_T<U, N> const & rhs) noexcept
 		{
-			detail::vector_helper<T, N>::DoMul(&vec_[0], &vec_[0], &rhs[0]);
+			detail::vector_helper<T, N>::DoMul(vec_.data(), vec_.data(), rhs.data());
 			return *this;
 		}
 		template <typename U>
-		Vector_T const & operator*=(U const & rhs) KLAYGE_NOEXCEPT
+		Vector_T const & operator*=(U const & rhs) noexcept
 		{
-			detail::vector_helper<T, N>::DoScale(&vec_[0], &vec_[0], rhs);
+			detail::vector_helper<T, N>::DoScale(vec_.data(), vec_.data(), rhs);
 			return *this;
 		}
 		template <typename U>
-		Vector_T const & operator/=(Vector_T<U, N> const & rhs) KLAYGE_NOEXCEPT
+		Vector_T const & operator/=(Vector_T<U, N> const & rhs) noexcept
 		{
-			detail::vector_helper<T, N>::DoDiv(&vec_[0], &vec_[0], &rhs[0]);
+			detail::vector_helper<T, N>::DoDiv(vec_.data(), vec_.data(), rhs.data());
 			return *this;
 		}
 		template <typename U>
-		Vector_T const & operator/=(U const & rhs) KLAYGE_NOEXCEPT
+		Vector_T const & operator/=(U const & rhs) noexcept
 		{
 			return this->operator*=(1.0f / rhs);
 		}
 
-		Vector_T& operator=(Vector_T const & rhs) KLAYGE_NOEXCEPT
+		Vector_T& operator=(Vector_T const & rhs) noexcept
 		{
 			if (this != &rhs)
 			{
@@ -289,38 +280,38 @@ namespace KlayGE
 			}
 			return *this;
 		}
-		Vector_T& operator=(Vector_T&& rhs) KLAYGE_NOEXCEPT
+		Vector_T& operator=(Vector_T&& rhs) noexcept
 		{
 			vec_ = std::move(rhs.vec_);
 			return *this;
 		}
 		template <typename U, int M>
-		Vector_T& operator=(Vector_T<U, M> const & rhs) KLAYGE_NOEXCEPT
+		Vector_T& operator=(Vector_T<U, M> const & rhs) noexcept
 		{
 			static_assert(M >= N, "Could not assign to a smaller vector.");
 
-			detail::vector_helper<T, N>::DoCopy(&vec_[0], &rhs.vec_[0]);
+			detail::vector_helper<T, N>::DoCopy(vec_.data(), rhs.data());
 			return *this;
 		}
 
 		// 一元操作符
-		Vector_T const operator+() const KLAYGE_NOEXCEPT
+		Vector_T const operator+() const noexcept
 			{ return *this; }
-		Vector_T const operator-() const KLAYGE_NOEXCEPT
+		Vector_T const operator-() const noexcept
 		{
 			Vector_T temp(*this);
-			detail::vector_helper<T, N>::DoNegate(&temp.vec_[0], &vec_[0]);
+			detail::vector_helper<T, N>::DoNegate(temp.data(), vec_.data());
 			return temp;
 		}
 
-		void swap(Vector_T& rhs) KLAYGE_NOEXCEPT
+		void swap(Vector_T& rhs) noexcept
 		{
-			detail::vector_helper<T, N>::DoSwap(&vec_[0], &rhs.vec_[0]);
+			detail::vector_helper<T, N>::DoSwap(vec_.data(), rhs.data());
 		}
 
-		bool operator==(Vector_T const & rhs) const KLAYGE_NOEXCEPT
+		bool operator==(Vector_T const & rhs) const noexcept
 		{
-			return detail::vector_helper<T, N>::DoEqual(&vec_[0], &rhs[0]);
+			return detail::vector_helper<T, N>::DoEqual(vec_.data(), rhs.data());
 		}
 
 	private:
@@ -328,7 +319,7 @@ namespace KlayGE
 	};
 
 	template <typename T, int N>
-	inline void swap(Vector_T<T, N>& lhs, Vector_T<T, N>& rhs) KLAYGE_NOEXCEPT
+	inline void swap(Vector_T<T, N>& lhs, Vector_T<T, N>& rhs) noexcept
 	{
 		lhs.swap(rhs);
 	}

@@ -47,7 +47,7 @@ namespace KlayGE
 	KLAYGE_CORE_API AABBox CalcFrustumExtents(Camera const & camera, float near_z, float far_z,
 		float4x4 const & light_view_proj);
 
-	class KLAYGE_CORE_API CascadedShadowLayer
+	class KLAYGE_CORE_API CascadedShadowLayer : boost::noncopyable
 	{
 	public:
 		static uint32_t const MAX_NUM_CASCADES = 4UL;
@@ -93,7 +93,7 @@ namespace KlayGE
 		void Lambda(float lambda);
 
 		virtual void UpdateCascades(Camera const & camera, float4x4 const & light_view_proj,
-			float3 const & light_space_border) KLAYGE_OVERRIDE;
+			float3 const & light_space_border) override;
 
 	private:
 		float lambda_;
@@ -112,58 +112,72 @@ namespace KlayGE
 		void DepthTexture(TexturePtr const & depth_tex);
 
 		virtual void UpdateCascades(Camera const & camera, float4x4 const & light_view_proj,
-			float3 const & light_space_border) KLAYGE_OVERRIDE;
+			float3 const & light_space_border) override;
 
 	private:
 		TexturePtr depth_tex_;
+		ShaderResourceViewPtr depth_srv_;
 		bool cs_support_;
 
 		// For CS implement
-		RenderTechniquePtr clear_z_bounds_tech_;
-		RenderTechniquePtr reduce_z_bounds_from_depth_tech_;
-		RenderTechniquePtr compute_log_cascades_from_z_bounds_tech_;
-		RenderTechniquePtr clear_cascade_bounds_tech_;
-		RenderTechniquePtr reduce_bounds_from_depth_tech_;
-		RenderTechniquePtr compute_custom_cascades_tech_;
-		RenderEffectParameterPtr interval_buff_param_;
-		RenderEffectParameterPtr interval_buff_uint_param_;
-		RenderEffectParameterPtr interval_buff_read_param_;
-		RenderEffectParameterPtr scale_buff_param_;
-		RenderEffectParameterPtr bias_buff_param_;
-		RenderEffectParameterPtr cascade_min_buff_uint_param_;
-		RenderEffectParameterPtr cascade_max_buff_uint_param_;
-		RenderEffectParameterPtr cascade_min_buff_read_param_;
-		RenderEffectParameterPtr cascade_max_buff_read_param_;
-		RenderEffectParameterPtr depth_tex_param_;
-		RenderEffectParameterPtr num_cascades_param_;
-		RenderEffectParameterPtr inv_depth_width_height_param_;
-		RenderEffectParameterPtr near_far_param_;
-		RenderEffectParameterPtr upper_left_param_;
-		RenderEffectParameterPtr xy_dir_param_;
-		RenderEffectParameterPtr view_to_light_view_proj_param_;
-		RenderEffectParameterPtr light_space_border_param_;
-		RenderEffectParameterPtr max_cascade_scale_param_;
+		RenderEffectPtr effect_;
+		RenderTechnique* clear_z_bounds_tech_;
+		RenderTechnique* reduce_z_bounds_from_depth_tech_;
+		RenderTechnique* compute_log_cascades_from_z_bounds_tech_;
+		RenderTechnique* clear_cascade_bounds_tech_;
+		RenderTechnique* reduce_bounds_from_depth_tech_;
+		RenderTechnique* compute_custom_cascades_tech_;
+		RenderEffectParameter* interval_buff_param_;
+		RenderEffectParameter* interval_buff_uint_param_;
+		RenderEffectParameter* interval_buff_read_param_;
+		RenderEffectParameter* scale_buff_param_;
+		RenderEffectParameter* bias_buff_param_;
+		RenderEffectParameter* cascade_min_buff_uint_param_;
+		RenderEffectParameter* cascade_max_buff_uint_param_;
+		RenderEffectParameter* cascade_min_buff_read_param_;
+		RenderEffectParameter* cascade_max_buff_read_param_;
+		RenderEffectParameter* depth_tex_param_;
+		RenderEffectParameter* num_cascades_param_;
+		RenderEffectParameter* inv_depth_width_height_param_;
+		RenderEffectParameter* near_far_param_;
+		RenderEffectParameter* upper_left_param_;
+		RenderEffectParameter* xy_dir_param_;
+		RenderEffectParameter* view_to_light_view_proj_param_;
+		RenderEffectParameter* light_space_border_param_;
+		RenderEffectParameter* max_cascade_scale_param_;
 
 		GraphicsBufferPtr interval_buff_;
+		UnorderedAccessViewPtr interval_buff_float_uav_;
+		UnorderedAccessViewPtr interval_buff_uint_uav_;
+		ShaderResourceViewPtr interval_buff_srv_;
 		GraphicsBufferPtr scale_buff_;
+		UnorderedAccessViewPtr scale_buff_uav_;
 		GraphicsBufferPtr bias_buff_;
+		UnorderedAccessViewPtr bias_buff_uav_;
 		GraphicsBufferPtr cascade_min_buff_;
+		UnorderedAccessViewPtr cascade_min_buff_uint_uav_;
+		ShaderResourceViewPtr cascade_min_buff_srv_;
 		GraphicsBufferPtr cascade_max_buff_;
+		UnorderedAccessViewPtr cascade_max_buff_uint_uav_;
+		ShaderResourceViewPtr cascade_max_buff_srv_;
 
-		GraphicsBufferPtr interval_cpu_buffs_[2];
-		GraphicsBufferPtr scale_cpu_buffs_[2];
-		GraphicsBufferPtr bias_cpu_buffs_[2];
-		uint32_t frame_index_;
+		GraphicsBufferPtr interval_cpu_buff_;
+		GraphicsBufferPtr scale_cpu_buff_;
+		GraphicsBufferPtr bias_cpu_buff_;
 
 		// For PS implement
-		TexturePtr depth_deriative_tex_;
-		TexturePtr depth_deriative_small_tex_;
+		TexturePtr depth_derivative_tex_;
+		std::vector<ShaderResourceViewPtr> depth_derivative_mip_srvs_;
+		std::vector<RenderTargetViewPtr> depth_derivative_mip_rtvs_;
+		TexturePtr depth_derivative_small_tex_;
+		std::vector<RenderTargetViewPtr> depth_derivative_small_mip_rtvs_;
 		PostProcessPtr reduce_z_bounds_from_depth_pp_;
 		PostProcessPtr reduce_z_bounds_from_depth_mip_map_pp_;
 		PostProcessPtr compute_log_cascades_from_z_bounds_pp_;
 
 		TexturePtr interval_tex_;
-		TexturePtr interval_cpu_texs_[2];
+		RenderTargetViewPtr interval_rtv_;
+		TexturePtr interval_cpu_tex_;
 	};
 }
 

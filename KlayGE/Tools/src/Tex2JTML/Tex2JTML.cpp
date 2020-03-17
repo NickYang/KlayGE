@@ -1,4 +1,35 @@
+/**
+ * @file Tex2JTML.cpp
+ * @author Minmin Gong
+ *
+ * @section DESCRIPTION
+ *
+ * This source file is part of KlayGE
+ * For the latest info, see http://www.klayge.org
+ *
+ * @section LICENSE
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published
+ * by the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+ *
+ * You may alternatively use this source under the terms of
+ * the KlayGE Proprietary License (KPL). You can obtained such a license
+ * from http://www.klayge.org/licensing/.
+ */
+
 #include <KlayGE/KlayGE.hpp>
+#include <KFL/ErrorHandling.hpp>
 #include <KFL/Util.hpp>
 #include <KFL/Timer.hpp>
 #include <KlayGE/Texture.hpp>
@@ -7,79 +38,26 @@
 #include <KlayGE/App3D.hpp>
 #include <KlayGE/RenderFactory.hpp>
 #include <KlayGE/ResLoader.hpp>
+#include <KFL/CXX17/filesystem.hpp>
 
 #include <iostream>
 #include <fstream>
 #include <vector>
+#include <regex>
 
-#if defined(KLAYGE_TS_LIBRARY_FILESYSTEM_V3_SUPPORT)
-	#include <experimental/filesystem>
-#elif defined(KLAYGE_TS_LIBRARY_FILESYSTEM_V2_SUPPORT)
-	#include <filesystem>
-	namespace std
-	{
-		namespace experimental
-		{
-			namespace filesystem = std::tr2::sys;
-		}
-	}
-#else
-	#if defined(KLAYGE_COMPILER_GCC)
-		#pragma GCC diagnostic push
-		#pragma GCC diagnostic ignored "-Wdeprecated-declarations" // Ignore auto_ptr declaration
-	#endif
-	#include <boost/filesystem.hpp>
-	#if defined(KLAYGE_COMPILER_GCC)
-		#pragma GCC diagnostic pop
-	#endif
-	namespace std
-	{
-		namespace experimental
-		{
-			namespace filesystem = boost::filesystem;
-		}
-	}
+#ifndef KLAYGE_DEBUG
+#define CXXOPTS_NO_RTTI
 #endif
-#ifdef KLAYGE_CXX11_LIBRARY_REGEX_SUPPORT
-	#include <regex>
-#else
-	#include <boost/regex.hpp>
-	namespace std
-	{
-		using boost::regex;
-		using boost::regex_match;
-		using boost::smatch;
-	}
-#endif
+#include <cxxopts.hpp>
 
-#if defined(KLAYGE_COMPILER_MSVC)
-#pragma warning(push)
-#pragma warning(disable: 4512) // boost::program_options::options_description doesn't have assignment operator
-#elif defined(KLAYGE_COMPILER_GCC)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations" // Ignore auto_ptr declaration
-#endif
-#include <boost/program_options.hpp>
-#if defined(KLAYGE_COMPILER_MSVC)
-#pragma warning(pop)
-#elif defined(KLAYGE_COMPILER_GCC)
-#pragma GCC diagnostic pop
-#endif
-#if defined(KLAYGE_COMPILER_GCC)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations" // Ignore auto_ptr declaration
-#endif
 #include <boost/algorithm/string/split.hpp>
-#if defined(KLAYGE_COMPILER_GCC)
-#pragma GCC diagnostic pop
-#endif
 #include <boost/algorithm/string/trim.hpp>
 
 #include <KlayGE/JudaTexture.hpp>
+#include <KlayGE/ToolCommon.hpp>
 
 using namespace std;
 using namespace KlayGE;
-using namespace std::experimental;
 
 struct TextureDesc
 {
@@ -88,46 +66,6 @@ struct TextureDesc
 	uint32_t height;
 };
 typedef std::shared_ptr<TextureDesc> TextureDescPtr;
-
-std::string DosWildcardToRegex(std::string const & wildcard)
-{
-	std::string ret;
-	for (size_t i = 0; i < wildcard.size(); ++ i)
-	{
-		switch (wildcard[i])
-		{
-		case '*':
-			ret.append(".*");
-			break;
-
-		case '?':
-			ret.append(".");
-			break;
-
-		case '+':
-		case '(':
-		case ')':
-		case '^':
-		case '$':
-		case '.':
-		case '{':
-		case '}':
-		case '[':
-		case ']':
-		case '|':
-		case '\\':
-			ret.push_back('\\');
-			ret.push_back(wildcard[i]);
-			break;
-
-		default:
-			ret.push_back(wildcard[i]);
-			break;
-		}
-	}
-
-	return ret;
-}
 
 // From http://www.blackpawn.com/texts/lightmaps/default.html
 class TexPackNode : public std::enable_shared_from_this<TexPackNode>
@@ -320,8 +258,7 @@ void WriteJTML(std::shared_ptr<TexPackNode> const & root, std::string const & jt
 		break;
 
 	default:
-		BOOST_ASSERT(false);
-		break;
+		KFL_UNREACHABLE("Unsupported element format");
 	}
 
 	std::ofstream os(jtml_name.c_str());
@@ -375,22 +312,21 @@ int main(int argc, char* argv[])
 	std::vector<std::string> tex_names;
 	std::string jtml_name;
 
-	boost::program_options::options_description desc("Allowed options");
-	desc.add_options()
-		("help,H", "Produce help message")
-		("input-name,I", boost::program_options::value<std::string>(), "Input textures names.")
-		("output-name,O", boost::program_options::value<std::string>(), "Output jtml name.")
-		("num-tiles,N", boost::program_options::value<int>(&num_tiles)->default_value(2048), "Number of tiles. Default is 2048.")
-		("tile-size,T", boost::program_options::value<int>(&tile_size)->default_value(128), "Tile size. Default is 128.")
-		("version,v", "Version.");
+	cxxopts::Options options("ImageConv", "KlayGE Tex2JTML Generator");
+	options.add_options()
+		("H,help", "Produce help message.")
+		("I,input-name", "Input textures names.", cxxopts::value<std::string>())
+		("O,output-name", "Output jtml name.", cxxopts::value<std::string>())
+		("N,num-tiles", "Number of tiles.", cxxopts::value<int>(num_tiles)->default_value("2048"))
+		("T,tile-size", "Tile size.", cxxopts::value<int>(tile_size)->default_value("128"))
+		("v,version", "Version.");
 
-	boost::program_options::variables_map vm;
-	boost::program_options::store(boost::program_options::parse_command_line(argc, argv, desc), vm);
-	boost::program_options::notify(vm);
+	int const argc_backup = argc;
+	auto vm = options.parse(argc, argv);
 
-	if ((argc <= 1) || (vm.count("help") > 0))
+	if ((argc_backup <= 1) || (vm.count("help") > 0))
 	{
-		cout << desc << endl;
+		cout << options.help() << endl;
 		return 1;
 	}
 	if (vm.count("version") > 0)
@@ -413,22 +349,22 @@ int main(int argc, char* argv[])
 			}
 			else
 			{
-				std::regex const filter(DosWildcardToRegex(arg));
+				filesystem::path arg_path(arg);
+				auto const parent = arg_path.parent_path();
+				auto const file_name = arg_path.filename();
+
+				std::regex const filter(DosWildcardToRegex(file_name.string()));
 
 				filesystem::directory_iterator end_itr;
-				for (filesystem::directory_iterator i("."); i != end_itr; ++ i)
+				for (filesystem::directory_iterator i(parent); i != end_itr; ++ i)
 				{
 					if (filesystem::is_regular_file(i->status()))
 					{
 						std::smatch what;
-#ifdef KLAYGE_TS_LIBRARY_FILESYSTEM_V2_SUPPORT
-						std::string const name = i->path().filename();
-#else
 						std::string const name = i->path().filename().string();
-#endif
 						if (std::regex_match(name, what, filter))
 						{
-							tex_names.push_back(name);
+							tex_names.push_back((parent / name).string());
 						}
 					}
 				}
@@ -438,6 +374,7 @@ int main(int argc, char* argv[])
 	else
 	{
 		cout << "Need input textures names." << endl;
+		cout << options.help() << endl;
 		return 1;
 	}
 	if (vm.count("output-name") > 0)

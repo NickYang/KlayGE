@@ -39,19 +39,17 @@
 namespace KlayGE
 {
 	SSGIPostProcess::SSGIPostProcess()
-			: PostProcess(L"SSGI")
+			: PostProcess(L"SSGI", false,
+				MakeSpan<std::string>(),
+				MakeSpan<std::string>({"g_buffer_rt0_tex", "depth_tex", "shading_tex"}),
+				MakeSpan<std::string>({"out_tex"}),
+				RenderEffectPtr(), nullptr)
 	{
-		input_pins_.push_back(std::make_pair("g_buffer_tex", TexturePtr()));
-		input_pins_.push_back(std::make_pair("depth_tex", TexturePtr()));
-		input_pins_.push_back(std::make_pair("shading_tex", TexturePtr()));
+		auto effect = SyncLoadRenderEffect("SSGI.fxml");
+		this->Technique(effect, effect->TechniqueByName("SSGI"));
 
-		output_pins_.push_back(std::make_pair("out_tex", TexturePtr()));
-
-		this->Technique(SyncLoadRenderEffect("SSGI.fxml")->TechniqueByName("SSGI"));
-
-		proj_param_ = technique_->Effect().ParameterByName("proj");
-		inv_proj_param_ = technique_->Effect().ParameterByName("inv_proj");
-		far_plane_param_ = technique_->Effect().ParameterByName("far_plane");
+		proj_param_ = effect->ParameterByName("proj");
+		inv_proj_param_ = effect->ParameterByName("inv_proj");
 	}
 
 	void SSGIPostProcess::OnRenderBegin()
@@ -61,6 +59,5 @@ namespace KlayGE
 		Camera const & camera = Context::Instance().AppInstance().ActiveCamera();
 		*proj_param_ = camera.ProjMatrix();
 		*inv_proj_param_ = camera.InverseProjMatrix();
-		*far_plane_param_ = float2(camera.FarPlane(), 1.0f / camera.FarPlane());
 	}
 }

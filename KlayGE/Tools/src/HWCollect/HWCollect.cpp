@@ -32,8 +32,10 @@
 #define INITGUID
 #include <KFL/Util.hpp>
 #include <KFL/CpuInfo.hpp>
+#include <KFL/com_ptr.hpp>
 #include <KlayGE/HWDetect.hpp>
 
+#include <KlayGE/SALWrapper.hpp>
 #if defined KLAYGE_PLATFORM_WINDOWS
 	#include <windows.h>
 	#include <dxgi1_2.h>
@@ -55,7 +57,14 @@ void DetectOSInfo(std::ostream& os)
 #if defined KLAYGE_PLATFORM_WINDOWS_DESKTOP
 	typedef NTSTATUS (WINAPI *RtlGetVersionFunc)(OSVERSIONINFOEXW* pVersionInformation);
 	HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+#if defined(KLAYGE_COMPILER_GCC) && (KLAYGE_COMPILER_VERSION >= 80)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-function-type"
+#endif
 	RtlGetVersionFunc RtlGetVersion = reinterpret_cast<RtlGetVersionFunc>(::GetProcAddress(ntdll, "RtlGetVersion"));
+#if defined(KLAYGE_COMPILER_GCC) && (KLAYGE_COMPILER_VERSION >= 80)
+#pragma GCC diagnostic pop
+#endif
 	OSVERSIONINFOEXW os_ver_info;
 	os_ver_info.dwOSVersionInfoSize = sizeof(os_ver_info);
 	RtlGetVersion(&os_ver_info);
@@ -190,13 +199,7 @@ void DetectOSInfo(std::ostream& os)
 		os << "SP " << os_ver_info.wServicePackMajor << '.' << os_ver_info.wServicePackMinor;
 	}
 #else
-#if defined KLAYGE_PLATFORM_WINDOWS_UWP
-	os << "Windows UWP";
-#elif defined KLAYGE_PLATFORM_WINDOWS_STORE
 	os << "Windows Store";
-#elif defined KLAYGE_PLATFORM_WINDOWS_PHONE
-	os << "Windows Phone";
-#endif
 
 	::GetNativeSystemInfo(&si);
 #endif
@@ -272,7 +275,15 @@ void DetectGpuInfo(std::ostream& os)
 		os << "Unknown GPU";
 		return;
 	}
-	CreateDXGIFactory1Func DynamicCreateDXGIFactory1 = (CreateDXGIFactory1Func)::GetProcAddress(dxgi, "CreateDXGIFactory1");
+#if defined(KLAYGE_COMPILER_GCC) && (KLAYGE_COMPILER_VERSION >= 80)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-function-type"
+#endif
+	CreateDXGIFactory1Func DynamicCreateDXGIFactory1
+		= reinterpret_cast<CreateDXGIFactory1Func>(::GetProcAddress(dxgi, "CreateDXGIFactory1"));
+#if defined(KLAYGE_COMPILER_GCC) && (KLAYGE_COMPILER_VERSION >= 80)
+#pragma GCC diagnostic pop
+#endif
 	if (!DynamicCreateDXGIFactory1)
 	{
 		os << "Unknown GPU";
@@ -286,17 +297,15 @@ void DetectGpuInfo(std::ostream& os)
 	if (SUCCEEDED((*DynamicCreateDXGIFactory1)(IID_IDXGIFactory1, reinterpret_cast<void**>(&factory))))
 	{
 		UINT adapter_no = 0;
-		IDXGIAdapter1* adapter = nullptr;
-		while (factory->EnumAdapters1(adapter_no, &adapter) != DXGI_ERROR_NOT_FOUND)
+		com_ptr<IDXGIAdapter1> adapter;
+		while (factory->EnumAdapters1(adapter_no, adapter.release_and_put()) != DXGI_ERROR_NOT_FOUND)
 		{
 			if (adapter != nullptr)
 			{
 				DXGI_ADAPTER_DESC1 adapter_desc;
 				adapter->GetDesc1(&adapter_desc);
 
-				IDXGIAdapter2* adapter2;
-				adapter->QueryInterface(IID_IDXGIAdapter2, reinterpret_cast<void**>(&adapter2));
-				if (adapter2 != nullptr)
+				if (auto adapter2 = adapter.try_as<IDXGIAdapter2>(IID_IDXGIAdapter2))
 				{
 					DXGI_ADAPTER_DESC2 desc2;
 					adapter2->GetDesc2(&desc2);
@@ -310,10 +319,7 @@ void DetectGpuInfo(std::ostream& os)
 					adapter_desc.SharedSystemMemory = desc2.SharedSystemMemory;
 					adapter_desc.AdapterLuid = desc2.AdapterLuid;
 					adapter_desc.Flags = desc2.Flags;
-					adapter2->Release();
 				}
-
-				adapter->Release();
 
 				if (adapter_desc.Flags != DXGI_ADAPTER_FLAG_SOFTWARE)
 				{
@@ -357,7 +363,7 @@ void DetectMainboardInfo(std::ostream& os)
 		os << endl;
 
 		MemoryBank mem;
-		for (size_t i = 0; i < mem.SlotCount(); ++i)
+		for (size_t i = 0; i < mem.SlotCount(); ++ i)
 		{
 			if (mem[i].size != 0)
 			{
@@ -377,7 +383,7 @@ void DetectMainboardInfo(std::ostream& os)
 
 int main()
 {
-	std::stringstream ss;
+	std::ostringstream ss;
 
 	ss << "=== OS information ===" << endl;
 	DetectOSInfo(ss);

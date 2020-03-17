@@ -53,6 +53,7 @@ namespace KlayGE
 			depth_func(CF_Less),
 			front_stencil_enable(false),
 			front_stencil_func(CF_AlwaysPass),
+			front_stencil_ref(0),
 			front_stencil_read_mask(0xFFFF),
 			front_stencil_write_mask(0xFFFF),
 			front_stencil_fail(SOP_Keep),
@@ -60,6 +61,7 @@ namespace KlayGE
 			front_stencil_pass(SOP_Keep),
 			back_stencil_enable(false),
 			back_stencil_func(CF_AlwaysPass),
+			back_stencil_ref(0),
 			back_stencil_read_mask(0xFFFF),
 			back_stencil_write_mask(0xFFFF),
 			back_stencil_fail(SOP_Keep),
@@ -74,8 +76,8 @@ namespace KlayGE
 	}
 
 	BlendStateDesc::BlendStateDesc()
-		: alpha_to_coverage_enable(false),
-			independent_blend_enable(false)
+		: blend_factor(1, 1, 1, 1), sample_mask(0xFFFFFFFF),
+			alpha_to_coverage_enable(false), independent_blend_enable(false)
 	{
 		blend_enable.fill(false);
 		logic_op_enable.fill(false);
@@ -108,30 +110,5 @@ namespace KlayGE
 	bool operator<(SamplerStateDesc const & lhs, SamplerStateDesc const & rhs)
 	{
 		return std::memcmp(&lhs, &rhs, sizeof(lhs)) < 0;
-	}
-
-
-	RasterizerStateObjectPtr RasterizerStateObject::NullObject()
-	{
-		static RasterizerStateObjectPtr obj(Context::Instance().RenderFactoryInstance().MakeRasterizerStateObject(RasterizerStateDesc()));
-		return obj;
-	}
-
-	DepthStencilStateObjectPtr DepthStencilStateObject::NullObject()
-	{
-		static DepthStencilStateObjectPtr obj(Context::Instance().RenderFactoryInstance().MakeDepthStencilStateObject(DepthStencilStateDesc()));
-		return obj;
-	}
-
-	BlendStateObjectPtr BlendStateObject::NullObject()
-	{
-		static BlendStateObjectPtr obj(Context::Instance().RenderFactoryInstance().MakeBlendStateObject(BlendStateDesc()));
-		return obj;
-	}
-
-	SamplerStateObjectPtr SamplerStateObject::NullObject()
-	{
-		static SamplerStateObjectPtr obj(Context::Instance().RenderFactoryInstance().MakeSamplerStateObject(SamplerStateDesc()));
-		return obj;
 	}
 }

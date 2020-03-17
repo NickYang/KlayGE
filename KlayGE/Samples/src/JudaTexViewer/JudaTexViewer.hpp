@@ -13,8 +13,6 @@ class JudaTexViewer : public KlayGE::App3DFramework
 public:
 	JudaTexViewer();
 
-	bool ConfirmDevice() const;
-
 private:
 	void OnCreate();
 	void OnResize(KlayGE::uint32_t width, KlayGE::uint32_t height);
@@ -31,8 +29,9 @@ private:
 	KlayGE::JudaTexturePtr juda_tex_;
 
 	KlayGE::FontPtr font_;
-	KlayGE::SceneObjectPtr tile_;
-	KlayGE::SceneObjectPtr grid_border_;
+	KlayGE::RenderablePtr tile_renderable_;
+	KlayGE::RenderablePtr grid_border_renderable_;
+	KlayGE::SceneNodePtr node_;
 
 	KlayGE::GraphicsBufferPtr tile_pos_vb_;
 
@@ -48,6 +47,10 @@ private:
 	int id_open_;
 
 	std::string last_file_path_;
+
+	KlayGE::float4x4 mat_tile_scaling_;
+	KlayGE::float4x4 mat_translation_;
+	KlayGE::float4x4 mat_scaling_;
 };
 
 #endif		// _JUDATEXVIEWER_HPP

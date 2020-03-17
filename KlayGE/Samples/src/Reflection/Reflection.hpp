@@ -11,8 +11,6 @@ class ScreenSpaceReflectionApp : public KlayGE::App3DFramework
 public:
 	ScreenSpaceReflectionApp();
 
-	bool ConfirmDevice() const;
-
 private:
 	void OnCreate();
 	void OnResize(KlayGE::uint32_t width, KlayGE::uint32_t height);
@@ -28,13 +26,11 @@ private:
 private:
 	KlayGE::TrackballCameraController tb_controller_;
 
-	KlayGE::SceneObjectPtr teapot_;
-
-	KlayGE::LightSourcePtr point_light_;
+	KlayGE::SceneNodePtr teapot_;
 
 	KlayGE::FontPtr font_;
 
-	KlayGE::SceneObjectPtr sky_box_;
+	KlayGE::RenderablePtr skybox_;
 
 	KlayGE::DeferredRenderingLayer* deferred_rendering_;
 

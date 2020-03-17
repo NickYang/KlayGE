@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<effect>
+	<include name="GBuffer.fxml"/>
+
+	<technique name="NoLightingGBufferTech" inherit="GBufferTech" override="GBufferTech">
+		<pass name="p0">
+			<state name="front_stencil_enable" value="true"/>
+			<state name="front_stencil_func" value="always_pass"/>
+			<state name="front_stencil_ref" value="128"/>
+			<state name="front_stencil_pass" value="replace"/>
+			<state name="back_stencil_enable" value="true"/>
+			<state name="back_stencil_func" value="always_pass"/>
+			<state name="back_stencil_ref" value="128"/>
+			<state name="back_stencil_pass" value="replace"/>
+		</pass>
+	</technique>
+	<technique name="NoLightingGBufferAlphaBlendBackTech" inherit="GBufferAlphaBlendBackTech" override="GBufferAlphaBlendBackTech">
+		<pass name="p0">
+			<state name="front_stencil_enable" value="true"/>
+			<state name="front_stencil_func" value="always_pass"/>
+			<state name="front_stencil_ref" value="128"/>
+			<state name="front_stencil_pass" value="replace"/>
+			<state name="back_stencil_enable" value="true"/>
+			<state name="back_stencil_func" value="always_pass"/>
+			<state name="back_stencil_ref" value="128"/>
+			<state name="back_stencil_pass" value="replace"/>
+		</pass>
+	</technique>
+
+	<shader>
+		<![CDATA[
+void NoLightingSimpleForwardVS(uint instance_id : SV_InstanceID,
+			float4 pos : POSITION,
+			float2 texcoord : TEXCOORD0,
+			float4 tangent_quat : TANGENT,
+			out float2 oTexCoord : TEXCOORD0,
+			out float4 oPos : SV_Position)
+{
+	pos = float4(pos.xyz * pos_extent + pos_center, 1);
+	texcoord = texcoord * tc_extent + tc_center;
+	tangent_quat = normalize(tangent_quat * 2 - 1);
+
+	KlayGECameraInfo camera = CameraFromInstance(instance_id);
+	float4x4 mvp = camera.mvp;
+	
+	float3 result_pos;
+	float4 result_tangent_quat;
+	PositionNode(pos.xyz, tangent_quat, 0, 0, result_pos, result_tangent_quat);
+	oTexCoord = TexcoordNode(texcoord);
+
+	oPos = mul(float4(result_pos, 1), mvp);
+}
+
+float4 NoLightingSimpleForwardPS(float2 tc : TEXCOORD0) : SV_Target0
+{
+	float3 albedo = AlbedoNode(tc);
+	float opacity = OpacityNode(tc);
+	
+	return float4(albedo, opacity);
+}
+		]]>
+	</shader>
+	
+	<technique name="NoLightingSimpleForwardTech">
+		<pass name="p0">
+			<state name="cull_mode" value="back"/>
+
+			<state name="blend_enable" value="true"/>
+			<state name="src_blend" value="src_alpha"/>
+			<state name="dest_blend" value="inv_src_alpha"/>
+
+			<state name="vertex_shader" value="NoLightingSimpleForwardVS()"/>
+			<state name="pixel_shader" value="NoLightingSimpleForwardPS()"/>
+		</pass>
+	</technique>
+</effect>

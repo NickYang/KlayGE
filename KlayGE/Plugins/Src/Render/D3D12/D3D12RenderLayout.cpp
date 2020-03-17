@@ -30,9 +30,8 @@
 
 #include <KlayGE/KlayGE.hpp>
 #include <KFL/Util.hpp>
-#include <KFL/COMPtr.hpp>
-#include <KFL/ThrowErr.hpp>
 #include <KFL/Math.hpp>
+#include <KFL/Hash.hpp>
 #include <KlayGE/RenderEngine.hpp>
 #include <KlayGE/RenderFactory.hpp>
 #include <KlayGE/Context.hpp>
@@ -53,12 +52,12 @@ namespace KlayGE
 
 	std::vector<D3D12_INPUT_ELEMENT_DESC> const & D3D12RenderLayout::InputElementDesc() const
 	{
-		if (vertex_elems_12_.empty())
+		if (vertex_elems_.empty())
 		{
 			std::vector<D3D12_INPUT_ELEMENT_DESC> elems;
 			elems.reserve(vertex_streams_.size());
 
-			for (uint32_t i = 0; i < this->NumVertexStreams(); ++i)
+			for (uint32_t i = 0; i < this->NumVertexStreams(); ++ i)
 			{
 				std::vector<D3D12_INPUT_ELEMENT_DESC> stream_elems;
 				D3D12Mapping::Mapping(stream_elems, i, this->VertexStreamFormat(i), vertex_streams_[i].type, vertex_streams_[i].freq);
@@ -71,58 +70,134 @@ namespace KlayGE
 				elems.insert(elems.end(), stream_elems.begin(), stream_elems.end());
 			}
 
-			vertex_elems_12_.swap(elems);
+			vertex_elems_.swap(elems);
 		}
 
-		return vertex_elems_12_;
+		return vertex_elems_;
 	}
 
 	void D3D12RenderLayout::Active() const
 	{
-		uint32_t const num_vertex_streams = this->NumVertexStreams();
-		uint32_t const all_num_vertex_stream = num_vertex_streams + (this->InstanceStream() ? 1 : 0);
-
 		if (streams_dirty_)
 		{
-			vbvs_.resize(all_num_vertex_stream);
-			for (uint32_t i = 0; i < num_vertex_streams; ++ i)
-			{
-				D3D12GraphicsBuffer& d3dvb = *checked_cast<D3D12GraphicsBuffer*>(this->GetVertexStream(i).get());
-				vbvs_[i].BufferLocation = d3dvb.D3DBuffer()->GetGPUVirtualAddress();
-				vbvs_[i].SizeInBytes = d3dvb.Size();
-				vbvs_[i].StrideInBytes = this->VertexSize(i);
-			}
-
-			if (this->InstanceStream())
-			{
-				uint32_t const number = num_vertex_streams;
-
-				D3D12GraphicsBuffer& d3dvb = *checked_cast<D3D12GraphicsBuffer*>(this->InstanceStream().get());
-				vbvs_[number].BufferLocation = d3dvb.D3DBuffer()->GetGPUVirtualAddress();
-				vbvs_[number].SizeInBytes = d3dvb.Size();
-				vbvs_[number].StrideInBytes = this->InstanceSize();
-			}
-
-			if (this->UseIndices())
-			{
-				D3D12GraphicsBuffer& ib = *checked_cast<D3D12GraphicsBuffer*>(this->GetIndexStream().get());
-				ibv_.BufferLocation = ib.D3DBuffer()->GetGPUVirtualAddress();
-				ibv_.SizeInBytes = ib.Size();
-				ibv_.Format = D3D12Mapping::MappingFormat(index_format_);
-			}
+			const_cast<D3D12RenderLayout*>(this)->UpdateViewPointers();
 
 			streams_dirty_ = false;
 		}
 
-		D3D12RenderEngine& re = *checked_cast<D3D12RenderEngine*>(&Context::Instance().RenderFactoryInstance().RenderEngineInstance());
-		ID3D12GraphicsCommandListPtr const & cmd_list = re.D3DRenderCmdList();
+		uint32_t const num_vertex_streams = this->NumVertexStreams();
+		uint32_t const all_num_vertex_stream = num_vertex_streams + (this->InstanceStream() ? 1 : 0);
+
+		for (uint32_t i = 0; i < num_vertex_streams; ++ i)
+		{
+			auto& d3dvb = checked_cast<D3D12GraphicsBuffer&>(*this->GetVertexStream(i));
+			vbvs_[i].BufferLocation = d3dvb.GPUVirtualAddress();
+		}
+
+		if (this->InstanceStream())
+		{
+			uint32_t const number = num_vertex_streams;
+
+			auto& d3dvb = checked_cast<D3D12GraphicsBuffer&>(*this->InstanceStream());
+			vbvs_[number].BufferLocation = d3dvb.GPUVirtualAddress();
+		}
+
+		if (this->UseIndices())
+		{
+			auto& ib = checked_cast<D3D12GraphicsBuffer&>(*this->GetIndexStream());
+			ibv_.BufferLocation = ib.GPUVirtualAddress();
+		}
+
+		auto& d3d12_re = checked_cast<D3D12RenderEngine&>(Context::Instance().RenderFactoryInstance().RenderEngineInstance());
 		if (all_num_vertex_stream != 0)
 		{
-			cmd_list->IASetVertexBuffers(0, all_num_vertex_stream, &vbvs_[0]);
+			d3d12_re.IASetVertexBuffers(0, MakeSpan(&vbvs_[0], all_num_vertex_stream));
 		}
 		if (this->UseIndices())
 		{
-			cmd_list->IASetIndexBuffer(&ibv_);
+			d3d12_re.IASetIndexBuffer(ibv_);
+		}
+	}
+
+	void D3D12RenderLayout::UpdateViewPointers()
+	{
+		uint32_t const num_vertex_streams = this->NumVertexStreams();
+		uint32_t const all_num_vertex_stream = num_vertex_streams + (this->InstanceStream() ? 1 : 0);
+
+		vbvs_.resize(all_num_vertex_stream);
+		for (uint32_t i = 0; i < num_vertex_streams; ++ i)
+		{
+			auto& d3dvb = checked_cast<D3D12GraphicsBuffer&>(*this->GetVertexStream(i));
+			vbvs_[i].BufferLocation = d3dvb.GPUVirtualAddress();
+			vbvs_[i].SizeInBytes = d3dvb.Size();
+			vbvs_[i].StrideInBytes = this->VertexSize(i);
+		}
+
+		if (this->InstanceStream())
+		{
+			uint32_t const number = num_vertex_streams;
+
+			auto& d3dvb = checked_cast<D3D12GraphicsBuffer&>(*this->InstanceStream());
+			vbvs_[number].BufferLocation = d3dvb.GPUVirtualAddress();
+			vbvs_[number].SizeInBytes = d3dvb.Size();
+			vbvs_[number].StrideInBytes = this->InstanceSize();
+		}
+
+		if (this->UseIndices())
+		{
+			auto& ib = checked_cast<D3D12GraphicsBuffer&>(*this->GetIndexStream());
+			ibv_.BufferLocation = ib.GPUVirtualAddress();
+			ibv_.SizeInBytes = ib.Size();
+			ibv_.Format = D3D12Mapping::MappingFormat(index_format_);
+		}
+
+		pso_hash_value_ = 0;
+		HashCombine(pso_hash_value_, 'I');
+		auto const & input_elem_desc = this->InputElementDesc();
+		if (!input_elem_desc.empty())
+		{
+			char const * p = reinterpret_cast<char const *>(&input_elem_desc[0]);
+			HashRange(pso_hash_value_, p, p + input_elem_desc.size() * sizeof(input_elem_desc[0]));
+		}
+		HashCombine(pso_hash_value_, this->IndexStreamFormat());
+		HashCombine(pso_hash_value_, topo_type_);
+
+		ib_strip_cut_value_ = (EF_R16UI == this->IndexStreamFormat())
+			? D3D12_INDEX_BUFFER_STRIP_CUT_VALUE_0xFFFF : D3D12_INDEX_BUFFER_STRIP_CUT_VALUE_0xFFFFFFFF;
+		prim_topology_ = D3D12Mapping::MappingPriTopoType(topo_type_);
+	}
+
+	size_t D3D12RenderLayout::PsoHashValue()
+	{
+		if (streams_dirty_)
+		{
+			const_cast<D3D12RenderLayout*>(this)->UpdateViewPointers();
+
+			streams_dirty_ = false;
+		}
+
+		return pso_hash_value_;
+	}
+
+	void D3D12RenderLayout::UpdatePsoDesc(D3D12_GRAPHICS_PIPELINE_STATE_DESC& pso_desc, bool has_tessellation)
+	{
+		if (streams_dirty_)
+		{
+			const_cast<D3D12RenderLayout*>(this)->UpdateViewPointers();
+
+			streams_dirty_ = false;
+		}
+
+		pso_desc.InputLayout.pInputElementDescs = this->InputElementDesc().data();
+		pso_desc.InputLayout.NumElements = static_cast<UINT>(this->InputElementDesc().size());
+		pso_desc.IBStripCutValue = ib_strip_cut_value_;
+		if (has_tessellation)
+		{
+			pso_desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_PATCH;
+		}
+		else
+		{
+			pso_desc.PrimitiveTopologyType = prim_topology_;
 		}
 	}
 }

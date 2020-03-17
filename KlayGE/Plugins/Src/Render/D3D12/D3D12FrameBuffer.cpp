@@ -30,14 +30,15 @@
 
 #include <KlayGE/KlayGE.hpp>
 #include <KFL/Util.hpp>
-#include <KFL/ThrowErr.hpp>
 #include <KFL/Math.hpp>
+#include <KFL/Hash.hpp>
 #include <KlayGE/Context.hpp>
 #include <KlayGE/Texture.hpp>
 #include <KlayGE/RenderFactory.hpp>
 #include <KlayGE/FrameBuffer.hpp>
 
 #include <KlayGE/D3D12/D3D12RenderEngine.hpp>
+#include <KlayGE/D3D12/D3D12Mapping.hpp>
 #include <KlayGE/D3D12/D3D12RenderView.hpp>
 #include <KlayGE/D3D12/D3D12FrameBuffer.hpp>
 
@@ -45,12 +46,6 @@ namespace KlayGE
 {
 	D3D12FrameBuffer::D3D12FrameBuffer()
 	{
-		left_ = 0;
-		top_ = 0;
-
-		viewport_->left	= left_;
-		viewport_->top	= top_;
-
 		d3d_viewport_.MinDepth = 0.0f;
 		d3d_viewport_.MaxDepth = 1.0f;
 	}
@@ -69,63 +64,30 @@ namespace KlayGE
 	{
 		this->SetRenderTargets();
 
-		for (size_t i = 0; i < ua_views_.size(); ++i)
+		for (size_t i = 0; i < ua_views_.size(); ++ i)
 		{
 			checked_pointer_cast<D3D12UnorderedAccessView>(ua_views_[i])->ResetInitCount();
 		}
 	}
 
+	void D3D12FrameBuffer::OnUnbind()
+	{
+	}
+
 	void D3D12FrameBuffer::SetRenderTargets()
 	{
-		D3D12RenderEngine& re = *checked_cast<D3D12RenderEngine*>(&Context::Instance().RenderFactoryInstance().RenderEngineInstance());
-		ID3D12GraphicsCommandListPtr const & cmd_list = re.D3DRenderCmdList();
-
-		std::vector<ID3D12Resource*> rt_src;
-		std::vector<uint32_t> rt_first_subres;
-		std::vector<uint32_t> rt_num_subres;
-		std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> rt_handles(clr_views_.size());
-		for (uint32_t i = 0; i < clr_views_.size(); ++ i)
+		if (views_dirty_)
 		{
-			if (clr_views_[i])
-			{
-				D3D12RenderTargetRenderView* p = checked_cast<D3D12RenderTargetRenderView*>(clr_views_[i].get());
-				rt_src.push_back(p->RTSrc().get());
-				rt_first_subres.push_back(p->RTFirstSubRes());
-				rt_num_subres.push_back(p->RTNumSubRes());
+			this->UpdateViewPointers();
 
-				rt_handles[i] = p->D3DRenderTargetView()->Handle();
-			}
-			else
-			{
-#ifdef KLAYGE_CPU_X64
-				rt_handles[i].ptr = ~0ULL;
-#else
-				rt_handles[i].ptr = ~0UL;
-#endif
-			}
+			views_dirty_ = false;
 		}
 
-		D3D12_CPU_DESCRIPTOR_HANDLE ds_handle;
-		D3D12_CPU_DESCRIPTOR_HANDLE* ds_handle_ptr;
-		if (rs_view_)
-		{
-			D3D12DepthStencilRenderView* p = checked_cast<D3D12DepthStencilRenderView*>(rs_view_.get());
+		auto& re = checked_cast<D3D12RenderEngine&>(Context::Instance().RenderFactoryInstance().RenderEngineInstance());
+		auto* cmd_list = re.D3DRenderCmdList();
 
-			ds_handle = p->D3DDepthStencilView()->Handle();
-			ds_handle_ptr = &ds_handle;
-		}
-		else
-		{
-			ds_handle_ptr = nullptr;
-		}
-
-		cmd_list->OMSetRenderTargets(static_cast<UINT>(rt_handles.size()),
-			rt_handles.empty() ? nullptr : &rt_handles[0], false, ds_handle_ptr);
-
-		d3d_viewport_.TopLeftX = static_cast<float>(viewport_->left);
-		d3d_viewport_.TopLeftY = static_cast<float>(viewport_->top);
-		d3d_viewport_.Width = static_cast<float>(viewport_->width);
-		d3d_viewport_.Height = static_cast<float>(viewport_->height);
+		cmd_list->OMSetRenderTargets(static_cast<UINT>(d3d_rt_handles_.size()),
+			d3d_rt_handles_.empty() ? nullptr : &d3d_rt_handles_[0], false, d3d_ds_handle_ptr_);
 		re.RSSetViewports(1, &d3d_viewport_);
 	}
 
@@ -133,36 +95,36 @@ namespace KlayGE
 	{
 		if (flags & CBM_Color)
 		{
-			for (uint32_t i = 0; i < clr_views_.size(); ++ i)
+			for (uint32_t i = 0; i < rt_views_.size(); ++ i)
 			{
-				if (clr_views_[i])
+				if (rt_views_[i])
 				{
-					clr_views_[i]->ClearColor(clr);
+					rt_views_[i]->ClearColor(clr);
 				}
 			}
 		}
 		if ((flags & CBM_Depth) && (flags & CBM_Stencil))
 		{
-			if (rs_view_)
+			if (ds_view_)
 			{
-				rs_view_->ClearDepthStencil(depth, stencil);
+				ds_view_->ClearDepthStencil(depth, stencil);
 			}
 		}
 		else
 		{
 			if (flags & CBM_Depth)
 			{
-				if (rs_view_)
+				if (ds_view_)
 				{
-					rs_view_->ClearDepth(depth);
+					ds_view_->ClearDepth(depth);
 				}
 			}
 
 			if (flags & CBM_Stencil)
 			{
-				if (rs_view_)
+				if (ds_view_)
 				{
-					rs_view_->ClearStencil(stencil);
+					ds_view_->ClearStencil(stencil);
 				}
 			}
 		}
@@ -172,162 +134,186 @@ namespace KlayGE
 	{
 		if (flags & CBM_Color)
 		{
-			for (uint32_t i = 0; i < clr_views_.size(); ++ i)
+			for (uint32_t i = 0; i < rt_views_.size(); ++ i)
 			{
-				if (clr_views_[i])
+				if (rt_views_[i])
 				{
-					clr_views_[i]->Discard();
+					rt_views_[i]->Discard();
 				}
 			}
 		}
 		if ((flags & CBM_Depth) || (flags & CBM_Stencil))
 		{
-			if (rs_view_)
+			if (ds_view_)
 			{
-				rs_view_->Discard();
+				ds_view_->Discard();
 			}
 		}
 	}
 
 	void D3D12FrameBuffer::BindBarrier()
 	{
-		D3D12RenderEngine& re = *checked_cast<D3D12RenderEngine*>(&Context::Instance().RenderFactoryInstance().RenderEngineInstance());
-		ID3D12GraphicsCommandListPtr const & cmd_list = re.D3DRenderCmdList();
-
-		std::vector<ID3D12Resource*> rt_src;
-		std::vector<uint32_t> rt_first_subres;
-		std::vector<uint32_t> rt_num_subres;
-		for (uint32_t i = 0; i < clr_views_.size(); ++i)
+		if (views_dirty_)
 		{
-			if (clr_views_[i])
-			{
-				D3D12RenderTargetRenderView* p = checked_cast<D3D12RenderTargetRenderView*>(clr_views_[i].get());
-				rt_src.push_back(p->RTSrc().get());
-				rt_first_subres.push_back(p->RTFirstSubRes());
-				rt_num_subres.push_back(p->RTNumSubRes());
-			}
+			this->UpdateViewPointers();
+
+			views_dirty_ = false;
 		}
 
-		ID3D12Resource* ds_src;
-		uint32_t ds_first_subres;
-		uint32_t ds_num_subres;
-		if (rs_view_)
-		{
-			D3D12DepthStencilRenderView* p = checked_cast<D3D12DepthStencilRenderView*>(rs_view_.get());
-			ds_src = p->DSSrc().get();
-			ds_first_subres = p->DSFirstSubRes();
-			ds_num_subres = p->DSNumSubRes();
-		}
-		else
-		{
-			ds_src = nullptr;
-			ds_first_subres = 0;
-			ds_num_subres = 0;
-		}
+		auto const& re = checked_cast<D3D12RenderEngine const&>(Context::Instance().RenderFactoryInstance().RenderEngineInstance());
+		ID3D12GraphicsCommandList* cmd_list = re.D3DRenderCmdList();
 
-		std::vector<D3D12_RESOURCE_BARRIER> barrier_before;
-		for (size_t i = 0; i < rt_src.size(); ++ i)
+		for (size_t i = 0; i < d3d_rt_src_.size(); ++ i)
 		{
-			D3D12_RESOURCE_BARRIER barrier;
-			barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-			barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-			barrier.Transition.pResource = rt_src[i];
-			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
-			barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
-			for (uint32_t j = 0; j < rt_num_subres[i]; ++ j)
+			for (uint32_t j = 0; j < d3d_rt_num_subres_[i]; ++ j)
 			{
-				barrier.Transition.Subresource = rt_first_subres[i] + j;
-				barrier_before.push_back(barrier);
+				d3d_rt_src_[i]->UpdateResourceBarrier(cmd_list, d3d_rt_first_subres_[i] + j, D3D12_RESOURCE_STATE_RENDER_TARGET);
 			}
 		}
-		if (ds_src)
+		if (d3d_ds_src_)
 		{
-			D3D12_RESOURCE_BARRIER barrier;
-			barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-			barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-			barrier.Transition.pResource = ds_src;
-			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
-			barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_DEPTH_WRITE;
-			for (uint32_t j = 0; j < ds_num_subres; ++ j)
+			for (uint32_t j = 0; j < d3d_ds_num_subres_; ++ j)
 			{
-				barrier.Transition.Subresource = ds_first_subres + j;
-				barrier_before.push_back(barrier);
+				d3d_ds_src_->UpdateResourceBarrier(cmd_list, d3d_ds_first_subres_ + j, D3D12_RESOURCE_STATE_DEPTH_WRITE);
 			}
-		}
-		if (!barrier_before.empty())
-		{
-			cmd_list->ResourceBarrier(static_cast<UINT>(barrier_before.size()), &barrier_before[0]);
 		}
 	}
 
-	void D3D12FrameBuffer::UnbindBarrier()
+	void D3D12FrameBuffer::UpdateViewPointers()
 	{
-		D3D12RenderEngine& re = *checked_cast<D3D12RenderEngine*>(&Context::Instance().RenderFactoryInstance().RenderEngineInstance());
-		ID3D12GraphicsCommandListPtr const & cmd_list = re.D3DRenderCmdList();
-
-		std::vector<ID3D12Resource*> rt_src;
-		std::vector<uint32_t> rt_first_subres;
-		std::vector<uint32_t> rt_num_subres;
-		for (uint32_t i = 0; i < clr_views_.size(); ++i)
+		d3d_rt_src_.clear();
+		d3d_rt_first_subres_.clear();
+		d3d_rt_num_subres_.clear();
+		d3d_rt_handles_.resize(rt_views_.size());
+		for (uint32_t i = 0; i < rt_views_.size(); ++ i)
 		{
-			if (clr_views_[i])
+			if (rt_views_[i])
 			{
-				D3D12RenderTargetRenderView* p = checked_cast<D3D12RenderTargetRenderView*>(clr_views_[i].get());
-				rt_src.push_back(p->RTSrc().get());
-				rt_first_subres.push_back(p->RTFirstSubRes());
-				rt_num_subres.push_back(p->RTNumSubRes());
+				auto& p = checked_cast<D3D12RenderTargetView&>(*rt_views_[i]);
+				d3d_rt_src_.push_back(p.RTSrc().get());
+				d3d_rt_first_subres_.push_back(p.RTFirstSubRes());
+				d3d_rt_num_subres_.push_back(p.RTNumSubRes());
+
+				d3d_rt_handles_[i] = p.RetrieveD3DRenderTargetView()->Handle();
+			}
+			else
+			{
+#ifdef KLAYGE_CPU_X64
+				d3d_rt_handles_[i].ptr = ~0ULL;
+#else
+				d3d_rt_handles_[i].ptr = ~0UL;
+#endif
 			}
 		}
 
-		ID3D12Resource* ds_src;
-		uint32_t ds_first_subres;
-		uint32_t ds_num_subres;
-		if (rs_view_)
+		if (ds_view_)
 		{
-			D3D12DepthStencilRenderView* p = checked_cast<D3D12DepthStencilRenderView*>(rs_view_.get());
-			ds_src = p->DSSrc().get();
-			ds_first_subres = p->DSFirstSubRes();
-			ds_num_subres = p->DSNumSubRes();
+			auto& p = checked_cast<D3D12DepthStencilView&>(*ds_view_);
+			d3d_ds_src_ = p.DSSrc().get();
+			d3d_ds_first_subres_ = p.DSFirstSubRes();
+			d3d_ds_num_subres_ = p.DSNumSubRes();
+
+			d3d_ds_handle_ = p.RetrieveD3DDepthStencilView()->Handle();
+			d3d_ds_handle_ptr_ = &d3d_ds_handle_;
 		}
 		else
 		{
-			ds_src = nullptr;
-			ds_first_subres = 0;
-			ds_num_subres = 0;
+			d3d_ds_src_ = nullptr;
+			d3d_ds_first_subres_ = 0;
+			d3d_ds_num_subres_ = 0;
+
+			d3d_ds_handle_ptr_ = nullptr;
 		}
 
-		std::vector<D3D12_RESOURCE_BARRIER> barrier_after;
-		for (size_t i = 0; i < rt_src.size(); ++ i)
+		d3d_viewport_.TopLeftX = static_cast<float>(viewport_->Left());
+		d3d_viewport_.TopLeftY = static_cast<float>(viewport_->Top());
+		d3d_viewport_.Width = static_cast<float>(viewport_->Width());
+		d3d_viewport_.Height = static_cast<float>(viewport_->Height());
+
+		pso_hash_value_ = 0;
+		num_rts_ = 0;
+		rtv_formats_.fill(DXGI_FORMAT_UNKNOWN);
+		sample_count_ = 0;
+		sample_quality_ = 0;
+		for (size_t i = 0; i < rt_views_.size(); ++ i)
 		{
-			D3D12_RESOURCE_BARRIER barrier;
-			barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-			barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-			barrier.Transition.pResource = rt_src[i];
-			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
-			barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COMMON;
-			for (uint32_t j = 0; j < rt_num_subres[i]; ++ j)
+			auto view = rt_views_[i].get();
+			if (view)
 			{
-				barrier.Transition.Subresource = rt_first_subres[i] + j;
-				barrier_after.push_back(barrier);
+				auto fmt = view->Format();
+				HashCombine(pso_hash_value_, fmt);
+				rtv_formats_[i] = D3D12Mapping::MappingFormat(fmt);
+				num_rts_ = static_cast<uint32_t>(i + 1);
+
+				if (sample_count_ == 0)
+				{
+					sample_count_ = view->SampleCount();
+					sample_quality_ = view->SampleQuality();
+				}
+				else
+				{
+					BOOST_ASSERT(sample_count_ == view->SampleCount());
+					BOOST_ASSERT(sample_quality_ == view->SampleQuality());
+				}
 			}
 		}
-		if (ds_src)
 		{
-			D3D12_RESOURCE_BARRIER barrier;
-			barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-			barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-			barrier.Transition.pResource = ds_src;
-			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_DEPTH_WRITE;
-			barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COMMON;
-			for (uint32_t j = 0; j < ds_num_subres; ++ j)
+			auto view = ds_view_.get();
+			if (view)
 			{
-				barrier.Transition.Subresource = ds_first_subres + j;
-				barrier_after.push_back(barrier);
+				auto fmt = view->Format();
+				HashCombine(pso_hash_value_, fmt);
+				dsv_format_ = D3D12Mapping::MappingFormat(fmt);
+
+				if (sample_count_ == 0)
+				{
+					sample_count_ = view->SampleCount();
+					sample_quality_ = view->SampleQuality();
+				}
+				else
+				{
+					BOOST_ASSERT(sample_count_ == view->SampleCount());
+					BOOST_ASSERT(sample_quality_ == view->SampleQuality());
+				}
+			}
+			else
+			{
+				dsv_format_ = DXGI_FORMAT_UNKNOWN;
 			}
 		}
-		if (!barrier_after.empty())
+
+		HashCombine(pso_hash_value_, sample_count_);
+		HashCombine(pso_hash_value_, sample_quality_);
+	}
+
+	size_t D3D12FrameBuffer::PsoHashValue()
+	{
+		if (views_dirty_)
 		{
-			cmd_list->ResourceBarrier(static_cast<UINT>(barrier_after.size()), &barrier_after[0]);
+			this->UpdateViewPointers();
+
+			views_dirty_ = false;
 		}
+
+		return pso_hash_value_;
+	}
+
+	void D3D12FrameBuffer::UpdatePsoDesc(D3D12_GRAPHICS_PIPELINE_STATE_DESC& pso_desc)
+	{
+		if (views_dirty_)
+		{
+			this->UpdateViewPointers();
+
+			views_dirty_ = false;
+		}
+
+		pso_desc.NumRenderTargets = num_rts_;
+		for (uint32_t i = 0; i < 8; ++ i)
+		{
+			pso_desc.RTVFormats[i] = rtv_formats_[i];
+		}
+		pso_desc.DSVFormat = dsv_format_;
+		pso_desc.SampleDesc.Count = sample_count_;
+		pso_desc.SampleDesc.Quality = sample_quality_;
 	}
 }

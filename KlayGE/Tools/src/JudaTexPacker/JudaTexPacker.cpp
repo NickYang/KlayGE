@@ -1,4 +1,6 @@
 #include <KlayGE/KlayGE.hpp>
+
+#include <KFL/CXX17/filesystem.hpp>
 #include <KFL/Util.hpp>
 #include <KFL/Timer.hpp>
 #include <KlayGE/Context.hpp>
@@ -92,10 +94,14 @@ void PackJTML(std::string const & jtml_name)
 {
 	Timer timer;
 
-	ResIdentifierPtr jtml = ResLoader::Instance().Open(jtml_name);
+	std::filesystem::path jtml_path = ResLoader::Instance().Locate(jtml_name);
+	std::string const jtml_folder = jtml_path.parent_path().string() + '/';
+	ResLoader::Instance().AddPath(jtml_folder);
+
+	ResIdentifierPtr jtml = ResLoader::Instance().Open(jtml_path.string());
 
 	KlayGE::XMLDocument doc;
-	XMLNodePtr root = doc.Parse(jtml);
+	XMLNodePtr root = doc.Parse(*jtml);
 
 	uint32_t n = root->AttribInt("num_tiles", 2048);
 	uint32_t num_tiles = 1;
@@ -105,7 +111,7 @@ void PackJTML(std::string const & jtml_name)
 	}
 
 	uint32_t tile_size = root->AttribInt("tile_size", 128);
-	std::string fmt_str = root->AttribString("format", "");
+	std::string_view const fmt_str = root->AttribString("format", "");
 	ElementFormat format = EF_ARGB8;
 	if ("ARGB8" == fmt_str)
 	{
@@ -118,6 +124,7 @@ void PackJTML(std::string const & jtml_name)
 	uint32_t pixel_size = NumFormatBytes(format);
 
 	JudaTexturePtr juda_tex = MakeSharedPtr<JudaTexture>(num_tiles, tile_size, format);
+	juda_tex->CacheProperty(1024, format, 4);
 
 	uint32_t level = juda_tex->TreeLevels() - 1;
 
@@ -127,11 +134,11 @@ void PackJTML(std::string const & jtml_name)
 	{
 		timer.restart();
 
-		std::string name = node->AttribString("name", "");
+		std::string const name = std::string(node->AttribString("name", ""));
 		int32_t x = node->AttribInt("x", 0);
 		int32_t y = node->AttribInt("y", 0);
-		std::string address_u_str = node->AttribString("address_u", "wrap");
-		std::string address_v_str = node->AttribString("address_v", "wrap");
+		std::string_view const address_u_str = node->AttribString("address_u", "wrap");
+		std::string_view const address_v_str = node->AttribString("address_v", "wrap");
 		Color border_clr;
 		border_clr.r() = node->AttribFloat("border_r", 0.0f);
 		border_clr.g() = node->AttribFloat("border_g", 0.0f);
@@ -208,7 +215,7 @@ void PackJTML(std::string const & jtml_name)
 		uint32_t in_width = src_texture->Width(0);
 		uint32_t in_height = src_texture->Height(0);
 
-		TexturePtr texture = rf.MakeTexture2D(in_width, in_height, 1, 1, format, 1, 0, EAH_CPU_Read | EAH_CPU_Write, nullptr);
+		TexturePtr texture = rf.MakeTexture2D(in_width, in_height, 1, 1, format, 1, 0, EAH_CPU_Read | EAH_CPU_Write);
 		src_texture->CopyToTexture(*texture);
 
 		Texture::Mapper mapper(*texture, 0, 0, TMA_Read_Only, 0, 0, in_width, in_height);
@@ -289,6 +296,8 @@ void PackJTML(std::string const & jtml_name)
 	timer.restart();
 	SaveJudaTexture(juda_tex, base_name + ".jdt");
 	cout << "Takes " << timer.elapsed() << "s" << endl << endl;
+
+	ResLoader::Instance().DelPath(jtml_folder);
 }
 
 int main(int argc, char* argv[])

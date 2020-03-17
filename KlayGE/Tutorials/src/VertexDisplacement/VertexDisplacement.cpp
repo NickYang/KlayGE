@@ -1,5 +1,4 @@
 #include <KlayGE/KlayGE.hpp>
-#include <KFL/ThrowErr.hpp>
 #include <KFL/Util.hpp>
 #include <KFL/Math.hpp>
 #include <KlayGE/Font.hpp>
@@ -12,15 +11,16 @@
 #include <KlayGE/Context.hpp>
 #include <KlayGE/ResLoader.hpp>
 #include <KlayGE/RenderSettings.hpp>
-#include <KlayGE/SceneObjectHelper.hpp>
+#include <KlayGE/SceneNode.hpp>
 #include <KlayGE/UI.hpp>
 #include <KlayGE/Camera.hpp>
 
 #include <KlayGE/RenderFactory.hpp>
 #include <KlayGE/InputFactory.hpp>
 
-#include <vector>
+#include <iterator>
 #include <sstream>
+#include <vector>
 
 #include "SampleCommon.hpp"
 #include "VertexDisplacement.hpp"
@@ -39,47 +39,30 @@ namespace
 		FlagRenderable(int length_segs, int width_segs)
 			: RenderablePlane(static_cast<float>(LENGTH), static_cast<float>(WIDTH), length_segs, width_segs, true, false)
 		{
-			technique_ = SyncLoadRenderEffect("VertexDisplacement.fxml")->TechniqueByName("VertexDisplacement");
+			effect_ = SyncLoadRenderEffect("VertexDisplacement.fxml");
+			technique_ = effect_->TechniqueByName("VertexDisplacement");
 
-			*(technique_->Effect().ParameterByName("flag_tex")) = ASyncLoadTexture("powered_by_klayge.dds", EAH_GPU_Read | EAH_Immutable);
-			*(technique_->Effect().ParameterByName("half_length")) = LENGTH / 2.0f;
-			*(technique_->Effect().ParameterByName("half_width")) = WIDTH / 2.0f;
-			*(technique_->Effect().ParameterByName("lightDir")) = float3(1, 0, -1);
-
-			AABBox const & pos_bb = this->PosBound();
-			*(technique_->Effect().ParameterByName("pos_center")) = pos_bb.Center();
-			*(technique_->Effect().ParameterByName("pos_extent")) = pos_bb.HalfSize();
+			*(effect_->ParameterByName("flag_tex")) = ASyncLoadTexture("powered_by_klayge.dds", EAH_GPU_Read | EAH_Immutable);
+			*(effect_->ParameterByName("half_length")) = LENGTH / 2.0f;
+			*(effect_->ParameterByName("half_width")) = WIDTH / 2.0f;
+			*(effect_->ParameterByName("lightDir")) = float3(1, 0, -1);
 		}
 
 		void SetAngle(float angle)
 		{
-			*(technique_->Effect().ParameterByName("currentAngle")) = angle;
+			*(effect_->ParameterByName("currentAngle")) = angle;
 		}
 
 		void OnRenderBegin()
 		{
+			RenderablePlane::OnRenderBegin();
+
 			App3DFramework const & app = Context::Instance().AppInstance();
 			Camera const & camera = app.ActiveCamera();
 
-			*(technique_->Effect().ParameterByName("modelview")) = camera.ViewMatrix();
-			*(technique_->Effect().ParameterByName("proj")) = camera.ProjMatrix();
-			*(technique_->Effect().ParameterByName("mvp")) = camera.ViewProjMatrix();
-		}
-	};
-
-	class FlagObject : public SceneObjectHelper
-	{
-	public:
-		FlagObject(int length_segs, int width_segs)
-			: SceneObjectHelper(SOA_Cullable)
-		{
-			renderable_ = MakeSharedPtr<FlagRenderable>(length_segs, width_segs);
-		}
-
-		virtual bool MainThreadUpdate(float app_time, float /*elapsed_time*/) KLAYGE_OVERRIDE
-		{
-			checked_pointer_cast<FlagRenderable>(renderable_)->SetAngle(app_time / 0.4f);
-			return false;
+			*(effect_->ParameterByName("modelview")) = camera.ViewMatrix();
+			*(effect_->ParameterByName("proj")) = camera.ProjMatrix();
+			*(effect_->ParameterByName("mvp")) = camera.ViewProjMatrix();
 		}
 	};
 
@@ -111,17 +94,18 @@ VertexDisplacement::VertexDisplacement()
 	ResLoader::Instance().AddPath("../../Tutorials/media/VertexDisplacement");
 }
 
-bool VertexDisplacement::ConfirmDevice() const
-{
-	return true;
-}
-
 void VertexDisplacement::OnCreate()
 {
 	font_ = SyncLoadFont("gkai00mp.kfont");
 
-	flag_ = MakeSharedPtr<FlagObject>(8, 6);
-	flag_->AddToSceneManager();
+	flag_ = MakeSharedPtr<SceneNode>(MakeSharedPtr<RenderableComponent>(MakeSharedPtr<FlagRenderable>(8, 6)), SceneNode::SOA_Cullable);
+	flag_->OnMainThreadUpdate().Connect([](SceneNode& node, float app_time, float elapsed_time)
+		{
+			KFL_UNUSED(elapsed_time);
+
+			node.FirstComponentOfType<RenderableComponent>()->BoundRenderableOfType<FlagRenderable>().SetAngle(app_time / 0.4f);
+		});
+	Context::Instance().SceneManagerInstance().SceneRootNode().AddChild(flag_);
 
 	this->LookAt(float3(0, 0, -10), float3(0, 0, 0));
 	this->Proj(0.1f, 20.0f);
@@ -131,13 +115,17 @@ void VertexDisplacement::OnCreate()
 
 	InputEngine& inputEngine(Context::Instance().InputFactoryInstance().InputEngineInstance());
 	InputActionMap actionMap;
-	actionMap.AddActions(actions, actions + sizeof(actions) / sizeof(actions[0]));
+	actionMap.AddActions(actions, actions + std::size(actions));
 
 	action_handler_t input_handler = MakeSharedPtr<input_signal>();
-	input_handler->connect(std::bind(&VertexDisplacement::InputHandler, this, std::placeholders::_1, std::placeholders::_2));
+	input_handler->Connect(
+		[this](InputEngine const & sender, InputAction const & action)
+		{
+			this->InputHandler(sender, action);
+		});
 	inputEngine.ActionMap(actionMap, input_handler);
 
-	UIManager::Instance().Load(ResLoader::Instance().Open("VertexDisplacement.uiml"));
+	UIManager::Instance().Load(*ResLoader::Instance().Open("VertexDisplacement.uiml"));
 }
 
 void VertexDisplacement::OnResize(uint32_t width, uint32_t height)

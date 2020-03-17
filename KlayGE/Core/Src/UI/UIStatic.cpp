@@ -20,31 +20,12 @@
 namespace KlayGE
 {
 	UIStatic::UIStatic(UIDialogPtr const & dialog)
-					: UIControl(UIStatic::Type, dialog)
+					: UIStatic(UIStatic::Type, dialog)
 	{
-		this->InitDefaultElements();
 	}
 
 	UIStatic::UIStatic(uint32_t type, UIDialogPtr const & dialog)
 					: UIControl(type, dialog)
-	{
-		this->InitDefaultElements();
-	}
-
-	UIStatic::UIStatic(UIDialogPtr const & dialog, int ID, std::wstring const & strText, int4 const & coord_size, bool bIsDefault)
-					: UIControl(UIStatic::Type, dialog),
-						text_(strText)
-	{
-		this->InitDefaultElements();
-
-		// Set the ID and list index
-		this->SetID(ID);
-		this->SetLocation(coord_size.x(), coord_size.y());
-		this->SetSize(coord_size.z(), coord_size.w());
-		this->SetIsDefault(bIsDefault);
-	}
-
-	void UIStatic::InitDefaultElements()
 	{
 		UIElement Element;
 
@@ -52,8 +33,20 @@ namespace KlayGE
 			Element.SetFont(0, Color(1, 1, 1, 1), Font::FA_Hor_Left | Font::FA_Ver_Top);
 			Element.FontColor().States[UICS_Disabled] = Color(200.0f / 255, 200.0f / 255, 200.0f / 255, 200.0f / 255);
 
-			elements_.push_back(MakeSharedPtr<UIElement>(Element));
+			elements_.push_back(MakeUniquePtr<UIElement>(Element));
 		}
+	}
+
+	UIStatic::UIStatic(UIDialogPtr const & dialog, int ID, std::wstring const & strText, int4 const & coord_size, bool bIsDefault)
+					: UIStatic(dialog)
+	{
+		this->SetText(strText);
+
+		// Set the ID and list index
+		this->SetID(ID);
+		this->SetLocation(coord_size.x(), coord_size.y());
+		this->SetSize(coord_size.z(), coord_size.w());
+		this->SetIsDefault(bIsDefault);
 	}
 
 	void UIStatic::Render()

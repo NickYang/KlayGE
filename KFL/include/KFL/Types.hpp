@@ -34,7 +34,7 @@
 #pragma once
 
 #include <cstdint>
-#include <KFL/CXX11.hpp>
+#include <KFL/CXX17.hpp>
 
 #ifdef KLAYGE_COMPILER_MSVC
 	#define KLAYGE_RESTRICT __restrict

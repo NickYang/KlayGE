@@ -12,8 +12,6 @@ class SubSurfaceApp : public KlayGE::App3DFramework
 public:
 	SubSurfaceApp();
 
-	bool ConfirmDevice() const;
-
 private:
 	void OnCreate();
 	void OnResize(KlayGE::uint32_t width, KlayGE::uint32_t height);
@@ -26,14 +24,13 @@ private:
 
 	KlayGE::FontPtr font_;
 
-	KlayGE::SceneObjectPtr model_;
+	KlayGE::RenderModelPtr model_;
 
 	KlayGE::TrackballCameraController tbController_;
 
 	bool depth_texture_support_;
 	KlayGE::FrameBufferPtr back_face_depth_fb_;
 
-	KlayGE::SceneObjectPtr light_proxy_;
 	KlayGE::LightSourcePtr light_;
 
 	KlayGE::UIDialogPtr dialog_params_;

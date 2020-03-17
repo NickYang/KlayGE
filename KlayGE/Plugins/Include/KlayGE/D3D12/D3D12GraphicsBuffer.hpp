@@ -33,66 +33,67 @@
 
 #pragma once
 
+#include <unordered_map>
+
 #include <KlayGE/ElementFormat.hpp>
 #include <KlayGE/GraphicsBuffer.hpp>
 #include <KlayGE/D3D12/D3D12Typedefs.hpp>
 #include <KlayGE/D3D12/D3D12RenderView.hpp>
+#include <KlayGE/D3D12/D3D12Resource.hpp>
+#include <KlayGE/D3D12/D3D12GpuMemoryAllocator.hpp>
 
 namespace KlayGE
 {
-	class D3D12GraphicsBuffer : public GraphicsBuffer
+	class D3D12GraphicsBuffer : public GraphicsBuffer, public D3D12Resource
 	{
 	public:
-		D3D12GraphicsBuffer(BufferUsage usage, uint32_t access_hint,
-			uint32_t size_in_byte, ElementFormat fmt);
-		virtual ~D3D12GraphicsBuffer();
+		D3D12GraphicsBuffer(BufferUsage usage, uint32_t access_hint, uint32_t size_in_byte, uint32_t structure_byte_stride);
 
-		ID3D12ResourcePtr const & D3DBuffer() const
-		{
-			return buffer_;
-		}
-		ID3D12ResourcePtr const & D3DBufferCounterUpload() const
-		{
-			return buffer_counter_upload_;
-		}
+		D3D12ShaderResourceViewSimulationPtr const & RetrieveD3DShaderResourceView(ElementFormat pf, uint32_t first_elem,
+			uint32_t num_elems);
+		D3D12RenderTargetViewSimulationPtr const & RetrieveD3DRenderTargetView(ElementFormat pf, uint32_t first_elem, uint32_t num_elems);
+		D3D12UnorderedAccessViewSimulationPtr const & RetrieveD3DUnorderedAccessView(ElementFormat pf, uint32_t first_elem,
+			uint32_t num_elems);
 
-		D3D12ShaderResourceViewSimulationPtr const & D3DShaderResourceView() const
-		{
-			return d3d_sr_view_;
-		}
+		void CopyToBuffer(GraphicsBuffer& target) override;
+		void CopyToSubBuffer(GraphicsBuffer& target,
+			uint32_t dst_offset, uint32_t src_offset, uint32_t size) override;
 
-		D3D12UnorderedAccessViewSimulationPtr const & D3DUnorderedAccessView() const
-		{
-			return d3d_ua_view_;
-		}
+		void CreateHWResource(void const * init_data) override;
+		void DeleteHWResource() override;
+		bool HWResourceReady() const override;
 
-		void CopyToBuffer(GraphicsBuffer& rhs);
-
-		virtual void CreateHWResource(void const * init_data) KLAYGE_OVERRIDE;
-		virtual void DeleteHWResource() KLAYGE_OVERRIDE;
+		void UpdateSubresource(uint32_t offset, uint32_t size, void const * data) override;
 
 		uint32_t CounterOffset() const
 		{
 			return counter_offset_;
 		}
 
-		bool UpdateResourceBarrier(D3D12_RESOURCE_BARRIER& barrier, D3D12_RESOURCE_STATES target_state);
+		D3D12_GPU_VIRTUAL_ADDRESS GPUVirtualAddress() const
+		{
+			return gpu_vaddr_;
+		}
+
+		void ResetInitCount(uint64_t count);
 
 	private:
-
 		void* Map(BufferAccess ba);
 		void Unmap();
 
+		ID3D12ResourcePtr CreateBuffer(uint32_t access_hint, uint32_t size_in_byte);
+
 	private:
-		ID3D12ResourcePtr buffer_;
-		ID3D12ResourcePtr buffer_counter_upload_;
-		D3D12ShaderResourceViewSimulationPtr d3d_sr_view_;
-		D3D12UnorderedAccessViewSimulationPtr d3d_ua_view_;
+		D3D12GpuMemoryBlockPtr gpu_mem_block_;
 		uint32_t counter_offset_;
+		D3D12_GPU_VIRTUAL_ADDRESS gpu_vaddr_;
 
-		ElementFormat fmt_as_shader_res_;
+		BufferAccess mapped_ba_;
 
-		D3D12_RESOURCE_STATES curr_state_;
+		// TODO: Not caching those views
+		std::unordered_map<size_t, D3D12ShaderResourceViewSimulationPtr> d3d_sr_views_;
+		std::unordered_map<size_t, D3D12RenderTargetViewSimulationPtr> d3d_rt_views_;
+		std::unordered_map<size_t, D3D12UnorderedAccessViewSimulationPtr> d3d_ua_views_;
 	};
 	typedef std::shared_ptr<D3D12GraphicsBuffer> D3D12GraphicsBufferPtr;
 }

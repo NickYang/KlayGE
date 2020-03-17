@@ -19,22 +19,8 @@
 #pragma once
 
 #include <KlayGE/PreDeclare.hpp>
+#include <KlayGE/Signal.hpp>
 #include <KlayGE/OpenGL/OGLFrameBuffer.hpp>
-
-#if defined(KLAYGE_COMPILER_MSVC)
-#pragma warning(push)
-#pragma warning(disable: 4512) // boost::iterators::function_output_iterator<T>::output_proxy doesn't have assignment operator
-#pragma warning(disable: 4913) // User defined binary operator ',' exists but no overload could convert all operands
-#elif defined(KLAYGE_COMPILER_GCC)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations" // Ignore auto_ptr declaration
-#endif
-#include <boost/signals2.hpp>
-#if defined(KLAYGE_COMPILER_MSVC)
-#pragma warning(pop)
-#elif defined(KLAYGE_COMPILER_GCC)
-#pragma GCC diagnostic pop
-#endif
 
 namespace KlayGE
 {
@@ -59,11 +45,11 @@ namespace KlayGE
 		void FullScreen(bool fs);
 
 		// Method for dealing with resize / move & 3d library
-		void WindowMovedOrResized();
+		void WindowMovedOrResized(Window const& win);
 
 	private:
-		void OnExitSizeMove(Window const & win);
-		void OnSize(Window const & win, bool active);
+		void OnExitSizeMove(Window const& win);
+		void OnSize(Window const& win, bool active);
 
 	private:
 		std::string	name_;
@@ -76,7 +62,6 @@ namespace KlayGE
 		::Display* x_display_;
 		::Window x_window_;
 		::GLXContext x_context_;
-		::GLXFBConfig* fbc_;
 #endif
 
 		bool	isFullScreen_;
@@ -85,8 +70,8 @@ namespace KlayGE
 
 		std::wstring			description_;
 
-		boost::signals2::connection on_exit_size_move_connect_;
-		boost::signals2::connection on_size_connect_;
+		Signal::Connection on_exit_size_move_connect_;
+		Signal::Connection on_size_connect_;
 	};
 }
 

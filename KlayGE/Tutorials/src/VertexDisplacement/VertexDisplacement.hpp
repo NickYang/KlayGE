@@ -10,8 +10,6 @@ class VertexDisplacement : public KlayGE::App3DFramework
 public:
 	VertexDisplacement();
 
-	bool ConfirmDevice() const;
-
 private:
 	void OnCreate();
 	void OnResize(KlayGE::uint32_t width, KlayGE::uint32_t height);
@@ -22,7 +20,7 @@ private:
 	void InputHandler(KlayGE::InputEngine const & sender, KlayGE::InputAction const & action);
 
 	KlayGE::FontPtr font_;
-	KlayGE::SceneObjectPtr flag_;
+	KlayGE::SceneNodePtr flag_;
 
 	KlayGE::FirstPersonCameraController fpcController_;
 };
